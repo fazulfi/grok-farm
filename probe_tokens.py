@@ -17,6 +17,9 @@ Env:
   GROK_TOKEN_PROBE_URL      (default https://api.x.ai/v1/models)
   GROK_TOKEN_PROBE_TIMEOUT  (seconds, default 10)
   GROK_PROBE_SKIP_EXPIRED   (default true — offline jwt_expired without HTTP)
+  GROK_PROBE_DELAY          (seconds between probes, default 0)
+  GROK_PROBE_PROGRESS_EVERY (print every N, default 25; 0=off)
+  GROK_PROBE_COMMIT_EVERY   (commit every N marks, default 50; 0=end only)
 """
 from __future__ import annotations
 
@@ -121,6 +124,37 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"Probe URL (default: env or {DEFAULT_PROBE_URL})",
     )
+    p.add_argument(
+        "--delay",
+        type=float,
+        default=None,
+        metavar="SEC",
+        help="Sleep between probes (default: env GROK_PROBE_DELAY or 0)",
+    )
+    p.add_argument(
+        "--progress-every",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Progress line every N accounts (default: env or 25; 0=off)",
+    )
+    p.add_argument(
+        "--commit-every",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Commit every N marked accounts (default: env or 50; 0=end only)",
+    )
+    p.add_argument(
+        "--id-order",
+        action="store_true",
+        help="Order by id ASC only (default: unprobed first for resume)",
+    )
+    p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="No progress lines (final summary only)",
+    )
     return p
 
 
@@ -137,6 +171,19 @@ def main(argv: list[str] | None = None) -> int:
     skip_expired = False if args.no_skip_expired else _cli_skip_expired()
     mark = not args.no_mark and not args.dry_run
 
+    def _progress(done: int, total: int, st: dict) -> None:
+        if args.quiet or args.json:
+            return
+        by = st.get("by_status") or {}
+        print(
+            f"  … {done}/{total} "
+            f"alive={by.get('alive', 0)} "
+            f"needs_relogin={by.get('needs_relogin', 0)} "
+            f"jwt_expired={by.get('jwt_expired', 0)} "
+            f"net={by.get('network_error', 0)}",
+            flush=True,
+        )
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     migrate(conn)
@@ -150,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout if args.timeout is not None else _cli_probe_timeout(),
         url=args.url or _cli_probe_url(),
         mark_error=bool(args.mark_error) and not args.dry_run,
+        delay=args.delay,
+        progress_every=0 if args.quiet else args.progress_every,
+        commit_every=args.commit_every,
+        unprobed_first=not args.id_order,
+        progress_fn=None if (args.quiet or args.json) else _progress,
     )
     conn.close()
     if not args.dry_run:
@@ -170,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[probe_tokens] {mode}{hard} scope={'+'.join(statuses)} db={db_path}")
         print(
             f"  scanned={stats['scanned']} probed={stats['probed']} "
-            f"marked={stats['marked']} marked_error={stats['marked_error']}"
+            f"marked={stats['marked']} marked_error={stats['marked_error']} "
+            f"delay={stats.get('delay', 0)}"
         )
         by = stats.get("by_status") or {}
         parts = [f"{k}={v}" for k, v in sorted(by.items()) if v]

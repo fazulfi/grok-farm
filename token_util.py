@@ -349,6 +349,39 @@ def update_account_probe(
         )
 
 
+def _probe_delay_seconds() -> float:
+    """Inter-request delay for large batches (env GROK_PROBE_DELAY, default 0)."""
+    raw = (os.environ.get("GROK_PROBE_DELAY") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _probe_progress_every() -> int:
+    """Print progress every N accounts (env GROK_PROBE_PROGRESS_EVERY, default 25; 0=off)."""
+    raw = (os.environ.get("GROK_PROBE_PROGRESS_EVERY") or "").strip()
+    if not raw:
+        return 25
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 25
+
+
+def _probe_commit_every() -> int:
+    """Commit every N marked accounts (env GROK_PROBE_COMMIT_EVERY, default 50; 0=end only)."""
+    raw = (os.environ.get("GROK_PROBE_COMMIT_EVERY") or "").strip()
+    if not raw:
+        return 50
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 50
+
+
 def probe_accounts(
     conn,
     *,
@@ -360,10 +393,21 @@ def probe_accounts(
     timeout: Optional[float] = None,
     url: Optional[str] = None,
     mark_error: bool = False,
+    delay: Optional[float] = None,
+    progress_every: Optional[int] = None,
+    commit_every: Optional[int] = None,
+    unprobed_first: bool = True,
+    progress_fn: Optional[Any] = None,
 ) -> dict[str, Any]:
     """
     Probe accounts with given statuses (sequential). Soft by default:
     updates last_probe_* meta only; never flips injected→error unless mark_error.
+
+    Large-batch options:
+      - delay: sleep between HTTP probes (skip offline short-circuit still counts)
+      - progress_every: call progress_fn every N accounts
+      - commit_every: periodic commit so long runs are resume-safe
+      - unprobed_first: prefer NULL last_probe_at then older id (stable resume)
 
     Returns stats dict with counts per status + scanned/probed/marked/errors.
     """
@@ -373,14 +417,33 @@ def probe_accounts(
     if not status_list:
         status_list = ("injected",)
     placeholders = ",".join("?" for _ in status_list)
+    # Resume-friendly order: never-probed first, then by id (stable for --limit slices)
+    if unprobed_first:
+        order = (
+            "ORDER BY CASE WHEN last_probe_at IS NULL OR last_probe_at='' "
+            "THEN 0 ELSE 1 END, id ASC"
+        )
+    else:
+        order = "ORDER BY id ASC"
     sql = f"""SELECT email, access_token, status FROM accounts
               WHERE status IN ({placeholders})
-              ORDER BY id ASC"""
+              {order}"""
     rows = conn.execute(sql, status_list).fetchall()
     if limit is not None and limit > 0:
         rows = rows[: int(limit)]
 
     to = timeout if timeout is not None else _probe_timeout()
+    dly = float(delay) if delay is not None else _probe_delay_seconds()
+    prog_n = (
+        int(progress_every)
+        if progress_every is not None
+        else _probe_progress_every()
+    )
+    commit_n = (
+        int(commit_every)
+        if commit_every is not None
+        else _probe_commit_every()
+    )
     stats: dict[str, Any] = {
         "scanned": 0,
         "probed": 0,
@@ -388,8 +451,13 @@ def probe_accounts(
         "marked_error": 0,
         "dry_run": 1 if dry_run else 0,
         "skip_expired": 1 if skip_expired else 0,
+        "delay": dly,
+        "commit_every": commit_n,
+        "unprobed_first": 1 if unprobed_first else 0,
         "by_status": {s: 0 for s in PROBE_STATUSES},
     }
+    total = len(rows)
+    since_commit = 0
 
     for row in rows:
         if hasattr(row, "keys"):
@@ -409,21 +477,38 @@ def probe_accounts(
         stats["probed"] += 1
         stats["by_status"][st] = stats["by_status"].get(st, 0) + 1
 
-        if dry_run:
-            continue
+        if not dry_run:
+            if mark:
+                update_account_probe(conn, email, result, mark=True)
+                stats["marked"] += 1
+                since_commit += 1
 
-        if mark:
-            update_account_probe(conn, email, result, mark=True)
-            stats["marked"] += 1
+            # Optional hard mark: only when operator passes mark_error
+            if mark_error and st == "needs_relogin" and acct_status in (
+                "injected",
+                "farmed",
+            ):
+                conn.execute(
+                    """UPDATE accounts SET status='error', notes=?
+                       WHERE email=? AND status=?""",
+                    ("needs_relogin", email, acct_status),
+                )
+                stats["marked_error"] += 1
 
-        # Optional hard mark: only when operator passes mark_error
-        if mark_error and st == "needs_relogin" and acct_status in ("injected", "farmed"):
-            conn.execute(
-                """UPDATE accounts SET status='error', notes=?
-                   WHERE email=? AND status=?""",
-                ("needs_relogin", email, acct_status),
-            )
-            stats["marked_error"] += 1
+            if commit_n > 0 and since_commit >= commit_n:
+                conn.commit()
+                since_commit = 0
+
+        if prog_n > 0 and progress_fn and (stats["scanned"] % prog_n == 0):
+            try:
+                progress_fn(stats["scanned"], total, stats)
+            except Exception:
+                pass
+
+        # Rate-limit live HTTP path slightly; offline jwt_expired still delayed
+        # so large batches do not hammer api.x.ai when skip_expired is false.
+        if dly > 0 and stats["scanned"] < total:
+            time.sleep(dly)
 
     if not dry_run:
         conn.commit()
