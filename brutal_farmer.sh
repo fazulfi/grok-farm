@@ -27,6 +27,12 @@ while true; do
         continue
     fi
 
+    # 1b) Adaptive concurrent from domain_stats + proxy_stats (live-safe: next batch)
+    if [ "${GROK_ADAPTIVE_CONCURRENT:-1}" != "0" ]; then
+        CONCURRENT=$(python3 adaptive_concurrent.py --print 2>/dev/null || echo "$CONCURRENT")
+    fi
+    echo "[FARMER] concurrent=$CONCURRENT (adaptive=${GROK_ADAPTIVE_CONCURRENT:-1})"
+
     # 2) Farm
     printf '%s\n' "$ACCOUNTS_PER_BATCH" "$CONCURRENT" "Y" | .venv/bin/python farm.py
     EXIT_CODE=$?
@@ -36,7 +42,7 @@ while true; do
     python3 /home/magadirxwin/grok-farm/import_db.py >> workflow.log 2>&1 || true
     python3 /home/magadirxwin/grok-farm/workflow.py >> workflow.log 2>&1 || true
 
-    echo "[FARMER] === Batch finished at $(date) (farm_exit=$EXIT_CODE) ==="
+    echo "[FARMER] === Batch finished at $(date) (farm_exit=$EXIT_CODE concurrent=$CONCURRENT) ==="
     if [ "$EXIT_CODE" -ne 0 ]; then
         echo "[FARMER] WARN: farm non-zero, continuing unlimited"
     fi
