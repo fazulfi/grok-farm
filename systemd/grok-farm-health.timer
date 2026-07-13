@@ -1,0 +1,11 @@
+[Unit]
+Description=Grok Farm health check every 15 minutes
+Requires=grok-farm-health.service
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target
