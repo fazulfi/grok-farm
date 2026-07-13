@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS proxy_stats (
     last_email TEXT,
     score REAL NOT NULL DEFAULT 0.5,
     disabled INTEGER NOT NULL DEFAULT 0,
+    last_fail_reason TEXT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_proxy_score ON proxy_stats(score DESC);
@@ -120,7 +121,7 @@ def connect(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def _ensure_proxy_stats_columns(conn: sqlite3.Connection) -> None:
-    """Additive migration: consecutive_fails + disabled on older proxy_stats tables."""
+    """Additive migration: consecutive_fails + disabled + last_fail_reason on older tables."""
     try:
         cols = {
             str(r[1])
@@ -139,6 +140,13 @@ def _ensure_proxy_stats_columns(conn: sqlite3.Connection) -> None:
         try:
             conn.execute(
                 "ALTER TABLE proxy_stats ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.Error:
+            pass
+    if "last_fail_reason" not in cols:
+        try:
+            conn.execute(
+                "ALTER TABLE proxy_stats ADD COLUMN last_fail_reason TEXT"
             )
         except sqlite3.Error:
             pass
@@ -171,17 +179,77 @@ def _row_counts(row) -> tuple[int, int]:
         return int(row[0]), int(row[1])
 
 
+# Inject/farm fail taxonomy labels (short, no secrets). Used for proxy_stats.last_fail_reason.
+FAIL_CLASSES = frozenset(
+    {
+        "ok",
+        "timeout",
+        "proxy_error",
+        "auth",
+        "region",
+        "rate_limit",
+        "ssh",
+        "gateway",
+        "token",
+        "unknown",
+    }
+)
+
+
+def classify_proxy_fail(text: str = "", *, default: str = "unknown") -> str:
+    """Map inject/farm error text to a short fail class (no secrets)."""
+    s = (text or "").lower()
+    if not s:
+        return default if default in FAIL_CLASSES else "unknown"
+    if any(x in s for x in ("timeout", "timed out", "deadline", "etimedout")):
+        return "timeout"
+    if any(
+        x in s
+        for x in (
+            "proxy",
+            "tunnel",
+            "407",
+            "socks",
+            "connection refused",
+            "econnrefused",
+            "network unreachable",
+            "proxyerror",
+        )
+    ):
+        return "proxy_error"
+    if any(x in s for x in ("401", "403", "unauthorized", "forbidden", "auth", "credential")):
+        return "auth"
+    if any(x in s for x in ("region", "eu ", "geo", "country", "blocked", "not available in")):
+        return "region"
+    if any(x in s for x in ("429", "rate limit", "too many", "throttle")):
+        return "rate_limit"
+    if any(x in s for x in ("ssh", "connection reset", "broken pipe", "host key")):
+        return "ssh"
+    if any(x in s for x in ("gateway", "9router", "inject", "bulk_inject", "provider")):
+        return "gateway"
+    if any(x in s for x in ("token", "jwt", "expired", "eyj")):
+        return "token"
+    return default if default in FAIL_CLASSES else "unknown"
+
+
 def record_proxy_result(
     conn: sqlite3.Connection,
     proxy_url: str,
     success: bool,
     email: str = "",
     when_iso: str = "",
+    fail_reason: str = "",
 ) -> None:
-    """Track inject outcome per proxy; consecutive_fails + soft disabled (mirror domain_stats)."""
+    """Track inject/farm outcome per proxy; consecutive_fails + soft disabled + fail taxonomy."""
     key = proxy_key(proxy_url)
     if not key:
         return
+    reason = ""
+    if not success:
+        r = (fail_reason or "unknown").strip().lower()[:64]
+        reason = r if r in FAIL_CLASSES or r else "unknown"
+        if reason not in FAIL_CLASSES:
+            reason = classify_proxy_fail(reason)
     row = conn.execute(
         """SELECT success_count, fail_count, consecutive_fails, disabled
            FROM proxy_stats WHERE proxy_key=?""",
@@ -196,17 +264,17 @@ def record_proxy_result(
             conn.execute(
                 """INSERT INTO proxy_stats
                    (proxy_key, success_count, fail_count, consecutive_fails,
-                    last_success_at, last_email, score, disabled, updated_at)
-                   VALUES (?,?,?,?,?,?,?,0,?)""",
+                    last_success_at, last_email, score, disabled, last_fail_reason, updated_at)
+                   VALUES (?,?,?,?,?,?,?,0,NULL,?)""",
                 (key, sc, fc, cf, when_iso, email, score, when_iso),
             )
         else:
             conn.execute(
                 """INSERT INTO proxy_stats
                    (proxy_key, success_count, fail_count, consecutive_fails,
-                    last_fail_at, last_email, score, disabled, updated_at)
-                   VALUES (?,?,?,?,?,?,?,0,?)""",
-                (key, sc, fc, cf, when_iso, email, score, when_iso),
+                    last_fail_at, last_email, score, disabled, last_fail_reason, updated_at)
+                   VALUES (?,?,?,?,?,?,?,0,?,?)""",
+                (key, sc, fc, cf, when_iso, email, score, reason, when_iso),
             )
         return
     try:
@@ -234,9 +302,9 @@ def record_proxy_result(
     else:
         conn.execute(
             """UPDATE proxy_stats SET success_count=?, fail_count=?, consecutive_fails=?,
-               last_fail_at=?, last_email=?, score=?, disabled=?, updated_at=?
+               last_fail_at=?, last_email=?, score=?, disabled=?, last_fail_reason=?, updated_at=?
                WHERE proxy_key=?""",
-            (sc, fc, cf, when_iso, email, score, new_disabled, when_iso, key),
+            (sc, fc, cf, when_iso, email, score, new_disabled, reason, when_iso, key),
         )
 
 
@@ -386,4 +454,34 @@ def record_domain_result_standalone(
         harden_db_file(db_path)
     except Exception:
         # never break farm path on scoring errors
+        pass
+
+
+def record_proxy_result_standalone(
+    proxy_url: str,
+    success: bool,
+    email: str = "",
+    when_iso: str = "",
+    fail_reason: str = "",
+    db_path: Optional[str] = None,
+) -> None:
+    """Open DB, migrate, record proxy outcome, commit, harden. Safe from farm workers."""
+    if not proxy_key(proxy_url):
+        return
+    try:
+        conn = connect(db_path)
+        migrate(conn)
+        record_proxy_result(
+            conn,
+            proxy_url,
+            success,
+            email=email,
+            when_iso=when_iso,
+            fail_reason=fail_reason,
+        )
+        conn.commit()
+        conn.close()
+        harden_db_file(db_path)
+    except Exception:
+        # never break farm/inject path on scoring errors
         pass
