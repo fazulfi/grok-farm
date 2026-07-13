@@ -222,14 +222,23 @@ tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|mypapyr|budge
 
 #### Multi-Gmail (optional Pattern B)
 
+See RUNBOOK **R11** for full Cloudflare + safe rollout.
+
 ```bash
 cp identities.example.json identities.json
 chmod 600 identities.json
-nano identities.json   # real App Passwords; map domains per inbox
-echo 'GROK_IDENTITY_FILE=~/grok-farm/identities.json' >> .env
+# Edit: primary domains + secondary (enabled only after CF destination verify)
+# Pattern B example: primary owns domain-a; secondary owns domain-b after routing green
+nano identities.json   # real App Passwords; never commit
+grep -q '^GROK_IDENTITY_FILE=' .env \
+  || echo 'GROK_IDENTITY_FILE=~/grok-farm/identities.json' >> .env
+python3 -c "from email_identity import load_identity_pool; print(load_identity_pool('.').summary())"
+# Live-safe reload farm.py process (not full systemd stop unless needed)
+pkill -f 'python.*farm\.py' || true
+python3 check_status.py   # identity ids >= 2 when secondary enabled
 ```
 
-**Rules:** never commit `identities.json`; redaction applies to logs; one App Password leak → rotate that identity only.
+**Rules:** never commit `identities.json`; chmod 600; redaction applies to logs; App Password in chat → **rotate** after rollout; one leak → rotate that identity only.
 
 ### 4.2 Change concurrent
 
@@ -306,8 +315,20 @@ Retention: operator policy (disk is cheap; tokens are sensitive — encrypt back
 ~/grok-farm/scripts/s3_backup.sh
 # → s3://BUCKET/PREFIX/HOST/DATE/grok-farm-HOST-STAMP.tgz.age
 # → .../latest.tgz.age + LATEST.txt
+# then: s3_upload.py --retention (boto3; RETENTION_DAYS default 14)
 # log: ~/grok-farm/logs/s3_backup.log
 ```
+
+Retention keeps `latest.tgz.age` + `LATEST.txt`; deletes dated objects older than `RETENTION_DAYS` under `S3_PREFIX/HOST/`. Manual:
+
+```bash
+set -a; source ~/.config/grok-farm/backup.env; set +a
+export HOST_NAME="$(hostname -s)"
+python3 ~/grok-farm/scripts/s3_upload.py --retention --dry-run
+python3 ~/grok-farm/scripts/s3_upload.py --retention
+```
+
+See RUNBOOK **R12**.
 
 ### Operator pull backup
 
@@ -361,7 +382,11 @@ See [CAPACITY.md](./CAPACITY.md).
 
 ## 10. Alerts
 
-If `GROK_ALERT_WEBHOOK` is set, `workflow.py` / `alerts.py` POST redacted Discord-style messages on empty proxy pool, all-fail inject, partial inject, or errors.
+If `GROK_ALERT_WEBHOOK` (or `GROK_FARM_ALERT_WEBHOOK`) is set, `workflow.py` / `alerts.py` POST redacted Discord-style messages on empty proxy pool, all-fail inject, partial inject, or errors.
+
+- **Leave unset** if no Discord/Telegram webhook — do not invent a URL.
+- Bodies are redacted (no full JWT / proxy credentials).
+- Optional future: systemd timer that runs `check_status.py` and alerts on exit 2 (not required for steady state).
 
 ---
 

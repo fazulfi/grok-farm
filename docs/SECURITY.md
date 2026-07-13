@@ -105,7 +105,7 @@ age -d -i ~/.config/grok-farm/age.identity -o restore.tgz backup.tgz.age
 
 ### Alerts
 
-Optional webhook (Discord-compatible JSON `content` field):
+Optional webhook (Discord-compatible JSON `content` field). Wired in `alerts.py` + `workflow.py` (empty proxy pool, inject all-fail / partial / error). **Do not invent a fake webhook** — leave unset if unused.
 
 ```bash
 # .env (optional)
@@ -113,6 +113,27 @@ GROK_ALERT_WEBHOOK=https://discord.com/api/webhooks/...
 # alias also accepted:
 # GROK_FARM_ALERT_WEBHOOK=...
 ```
+
+Bodies pass through `log_redact` (no full JWT / proxy user:pass).
+
+### Windows age CLI (operator laptop)
+
+| Method | Command |
+|--------|---------|
+| Scoop | `scoop install age` |
+| Chocolatey | `choco install age.portable` |
+| Manual | [FiloSottile/age releases](https://github.com/FiloSottile/age/releases) → add to PATH |
+
+Decrypt: `age -d -i %USERPROFILE%\.config\grok-farm\age.identity -o restore.tgz backup.tgz.age`
+
+If CLI not installed, decrypt on any Linux host that has the vaulted identity (VPS root-only interim path is last resort).
+
+### Multi-Gmail secrets (`identities.json`)
+
+- Store only on VPS: `~/grok-farm/identities.json` owner farmer, mode **600**
+- **Never** commit real App Passwords; use `identities.example.json` placeholders only
+- If an App Password appeared in chat/logs: **rotate** in Google Account → App passwords after rollout
+- See RUNBOOK **R11** for Cloudflare destination + catch-all per domain
 
 ---
 
@@ -173,7 +194,7 @@ magadirxwin ALL=(root) NOPASSWD: /bin/systemctl start grok-farmer, /bin/systemct
 - **Import fail-closed:** `import_db.py` / `workflow.import_batches` insert dead JWT as `status=error` (`notes=token_expired|bad_token`), never as injectable `farmed`
 - **Inject path:** workflow skips inject for expired/invalid → `status=error`
 - **Batch cleanup:** `python3 mark_expired_tokens.py` (farmed-only default) or `python3 check_status.py --mark-expired`
-- **Injected inventory:** default leaves `status=injected` and refreshes meta only (soft health `many_expired_tokens`). Use `--include-injected` / `--mark-expired-injected` to set `status=error` for inventory cleanup — **does not** revoke 9router `providerConnections` (operator re-farm / re-auth separately; see RUNBOOK R10)
+- **Injected inventory (enterprise default = soft):** leave `status=injected`, refresh meta only (`many_expired_tokens` soft issue). **Do not** cron `--include-injected` — preserves 9router connection IDs / inject marks. Optional hard-mark is inventory hygiene only and **does not** revoke gateway `providerConnections` (see RUNBOOK R10)
 
 ---
 

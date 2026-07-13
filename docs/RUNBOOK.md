@@ -201,8 +201,10 @@ Hard refresh browser dashboard.
 | Row status | Dead JWT action |
 |------------|-----------------|
 | `farmed` | Always mark `status=error`, `notes=token_expired` or `bad_token` (import fail-closed + mark CLI) |
-| `injected` | Refresh `token_exp` / `token_health` only by default; optional `--include-injected` sets `status=error` for inventory hygiene |
+| `injected` | **Enterprise default = soft only**: refresh `token_exp` / `token_health`; do **not** set `status=error` (preserves 9router `grok_cli_connection_id` / inject marks). Optional `--include-injected` hard-marks inventory only — still **no** gateway revoke |
 | Gateway | **No auto-delete** of 9router `providerConnections` — re-farm or re-auth is a separate operator decision |
+
+**Recommended default:** run `mark_expired_tokens.py` without `--include-injected`. Soft health issue `many_expired_tokens` is inventory noise, not SEV1.
 
 ### Commands
 
@@ -235,6 +237,73 @@ python3 mark_expired_tokens.py --include-injected
 - Re-inject known-expired farmed rows hoping they revive
 - Commit tokens or dump JWT payloads into tickets
 - Treat soft expired inventory as SEV1 unless gateway yield is actually broken
+- Default to `--include-injected` in cron/systemd (breaks inventory↔gateway linkage for ops)
+
+---
+
+## R11 — Multi-Gmail / second inbox (Pattern B)
+
+**Goal:** split catch-all domains across two Gmail App Password inboxes via `identities.json`.
+
+### Cloudflare (required per domain zone)
+
+1. **Email Routing → Destination addresses:** add **each** Gmail (primary + secondary); verify both.
+2. **Catch-all / routing rules:** for domain assigned to secondary, route `*@domain` → secondary Gmail (not only primary).
+3. Do **not** enable secondary identity in farm until a probe address receives mail in the **secondary** IMAP inbox.
+
+### Farm config (VPS only — never git)
+
+```bash
+# ~/grok-farm/identities.json  chmod 600  owner farmer
+# Pattern B example:
+# primary  → domain-a.com  (imap primary@gmail.com)
+# secondary → domain-b.com (imap secondary@gmail.com)  enabled after CF green
+```
+
+```bash
+python3 -c "from email_identity import load_identity_pool; import json; print(json.dumps(load_identity_pool('.').summary(), indent=2))"
+# expect identity_count=2, source=file:.../identities.json
+python3 check_status.py   # identity ids=2
+```
+
+### Safe rollout
+
+1. Deploy `identities.json` with secondary **`enabled: false`** (primary still owns both domains).
+2. CF destination verify + catch-all for domain-b → secondary Gmail.
+3. IMAP probe: send to `probe@domain-b` → confirm in secondary inbox.
+4. Edit JSON: secondary `enabled: true`, remove domain-b from primary `domains`, keep `GROK_EMAIL_DOMAINS=a,b`.
+5. Live-safe: `pkill -f 'python.*farm.py'` (brutal loop respawns; do **not** stop systemd unless needed).
+6. Clear `domain_stats` for domain-b if it was skipped (R3d).
+
+### Rollback
+
+- Delete or rename `identities.json` → pool falls back to single `GROK_IMAP_*` env identity.
+- Or set secondary `enabled: false` and restore domain on primary.
+
+---
+
+## R12 — S3 retention / age decrypt (operator laptop)
+
+**Retention:** hourly backup runs `s3_upload.py --retention` (boto3). Keeps `latest.tgz.age` + `LATEST.txt`; deletes dated objects older than `RETENTION_DAYS` (default 14) under `S3_PREFIX/HOST/`.
+
+```bash
+# Manual retention (as farmer, with backup.env sourced)
+set -a; source ~/.config/grok-farm/backup.env; set +a
+export HOST_NAME="$(hostname -s)"
+python3 ~/grok-farm/scripts/s3_upload.py --retention --dry-run
+python3 ~/grok-farm/scripts/s3_upload.py --retention
+```
+
+**Windows age CLI (optional):**
+
+```powershell
+# Scoop:  scoop install age
+# Chocolatey:  choco install age.portable
+# Then decrypt:
+age -d -i $env:USERPROFILE\.config\grok-farm\age.identity -o restore.tgz backup.tgz.age
+```
+
+If age is not on PATH, decrypt on Linux/VPS that has the vaulted identity.
 
 ---
 
