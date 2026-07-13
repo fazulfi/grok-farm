@@ -9,11 +9,26 @@
 
 | Service | Host | Unit / process | Purpose |
 |---------|------|----------------|---------|
-| `grok-farmer` | Farm VPS | `systemd` | Unlimited farm → import → inject loop |
+| `grok-farmer` | Farm VPS | `systemd` (`brutal_farmer.sh` **v5**) | Unlimited farm → import → inject loop |
 | Camoufox | Farm VPS | child of `farm.py` | Browser automation |
 | 9router | Gateway VPS | `next-server` / custom | LLM gateway + proxyPools |
 | SSH tunnel path | Farm → Gateway | OpenSSH key | Proxy sync + inject |
-| `grok-farm-backup.timer` | Farm VPS | systemd timer | Hourly encrypted S3 backup |
+| `grok-farm-backup.timer` | Farm VPS | systemd timer | Hourly age-encrypted backup: **S3** `s3://grok-farm/farm-vps/csa/grok/` when `~/.config/grok-farm/backup.env` present; else local `~/grok-farm/backups/` |
+
+### Auto import / inject (brutal v5)
+
+Pipeline is automatic when farmer runs as the **non-root** user:
+
+1. After each `farm.py` exit → `import_db.py` + `workflow.py` (9router inject).
+2. **Mid-batch drain** every `GROK_MID_DRAIN_INTERVAL` seconds (default **120**; set `0` to disable) while farm is still running.
+3. `workflow.log` / `farm_brutal.log` must be **writable by farmer user**. If root-owned, you get `Permission denied` and **nothing reaches 9router** even though `accounts.txt` exists.
+
+```bash
+# Fix if inject stuck (common after root-run tests)
+sudo chown magadirxwin:magadirxwin ~/grok-farm/workflow.log ~/grok-farm/farm_brutal.log
+# Verify auto path
+grep -E 'SUMMARY|Permission denied|import\+workflow|mid-drain|Brutal Farmer v' ~/grok-farm/farm_brutal.log | tail -30
+```
 
 ---
 

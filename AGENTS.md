@@ -316,14 +316,16 @@ Automating account creation may violate third-party ToS. Agents implement techni
 | S3 restore over live `akun.db` | No | DR path only with confirm |
 | Revoke sudo / tighten SSH | Yes (security hardening) | Prefer additive + verify farmer still runs |
 
-**Live paths (CSA production — verify before assuming):**
+**Live paths (production — verify before assuming; updated 2026-07-13):**
 
+- Farm host: `168.144.137.240` (SSH alias `csa`; old `152.42.242.192` suspended)
 - App: `/home/magadirxwin/grok-farm`
-- DB: `/home/magadirxwin/grok-farm/akun.db`
-- Unit: `grok-farmer.service`
+- DB: `/home/magadirxwin/grok-farm/akun.db` (mode 600)
+- Unit: `grok-farmer.service` → `brutal_farmer.sh` **v5**
 - 9router SSH: `root@49.12.82.34 -p 39999` with farm user key (do not print private key)
+- **DR:** if this VPS dies → `docs/MIGRATION.md` PATH A/B + RUNBOOK **R16** (rebuild from age backup or `ops/export_9r_to_akun.py`)
 
-If host/user differs on a new VPS, follow `docs/DEPLOYMENT.md` / unit `User=` — do not hardcode CSA into new portable code without env override.
+If host/user differs on a new VPS, follow `docs/DEPLOYMENT.md` / unit `User=` — do not hardcode host IP into portable code without env override.
 
 ---
 

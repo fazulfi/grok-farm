@@ -412,3 +412,42 @@ Live-safe: next batch picks new concurrent; no `systemctl stop` required. Do not
 | SEV2 | High fail rate (>50%) | < 4h |
 | SEV3 | Single proxy bad | Next business day |
 | SEV4 | Docs/log noise | Backlog |
+
+
+---
+
+## R16 — Farm VPS dead / rebuild
+
+**Symptom:** SSH to farm host fails permanently; provider suspended; disk gone.
+
+**Do not:** wipe 9router proxyPools or mass-delete providerConnections while rebuilding farm.
+
+### Immediate triage
+
+1. Confirm gateway still up: SSH `root@GATEWAY -p 39999`.
+2. Confirm laptop has `age.identity` and/or password-manager secrets.
+3. Choose path in **docs/MIGRATION.md**:
+   - **PATH A** — decrypt `latest.tgz.age` → full restore
+   - **PATH B** — `python3 /root/export_9r_to_akun.py /tmp/akun_rebuild.db` on 9router → rebuild inventory; re-enter `.env` + `identities.json`
+   - **PATH C** — old host still briefly alive → `backup_farm.sh` then cutover
+   - **PATH D** — empty cold start
+
+### After new host is up
+
+| Check | Pass |
+|-------|------|
+| `systemctl is-active grok-farmer` | active |
+| Logs owned by farmer | not root (else inject Permission denied) |
+| `Brutal Farmer v5` in farm_brutal.log | yes |
+| `sync_proxies_from_9r.py` | lines > 0 |
+| `check_status.py` | identity + proxies + backup |
+| Mid-drain / SUMMARY | inject reaches 9router |
+
+Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
+
+### Prevention
+
+- Weekly: `scp csa:.../backups/latest.tgz.age` to laptop
+- Keep Gmail App Passwords + `GROK_PASSWORD` in password manager
+- Keep `age.identity` offline (laptop ACL locked)
+- Optional: restore S3 `backup.env` for offsite age archives
