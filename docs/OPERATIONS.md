@@ -14,6 +14,7 @@
 | 9router | Gateway VPS | `next-server` / custom | LLM gateway + proxyPools |
 | SSH tunnel path | Farm → Gateway | OpenSSH key | Proxy sync + inject |
 | `grok-farm-backup.timer` | Farm VPS | systemd timer | Hourly age-encrypted backup: **S3** `s3://grok-farm/farm-vps/csa/grok/` when `~/.config/grok-farm/backup.env` present; else local `~/grok-farm/backups/` |
+| `grok-farm-health.timer` | Farm VPS | systemd timer | Every **15 min** (`*:0/15` + RandomizedDelay ≤2m): inventory `check_status.py --json` via `scripts/health_check.sh`; webhook on exit 2 if `GROK_ALERT_WEBHOOK` set |
 
 ### Auto import / inject (brutal v5)
 
@@ -41,6 +42,11 @@ grep -E 'SUMMARY|Permission denied|import\+workflow|mid-drain|Brutal Farmer v' ~
 cd ~/grok-farm
 python3 check_status.py
 python3 check_status.py --json
+
+# Timer path (inventory only; no --probe/--mark-error)
+bash scripts/health_check.sh
+systemctl status grok-farm-health.timer --no-pager
+tail -30 ~/grok-farm/logs/health_check.log
 
 # Manual
 systemctl is-active grok-farmer
@@ -429,7 +435,7 @@ If `GROK_ALERT_WEBHOOK` (or `GROK_FARM_ALERT_WEBHOOK`) is set, `workflow.py` / `
 
 - **Leave unset** if no Discord/Telegram webhook — do not invent a URL.
 - Bodies are redacted (no full JWT / proxy credentials).
-- Optional future: systemd timer that runs `check_status.py` and alerts on exit 2 (not required for steady state).
+- **Health timer:** `grok-farm-health.timer` → `scripts/health_check.sh` → `check_status.py --json` every 15 minutes (inventory only; **no** `--probe` / `--mark-error`). On exit **2** (unhealthy) or unexpected failure, posts via `alerts.send_alert` when webhook is set. Log: `logs/health_check.log`.
 
 ---
 

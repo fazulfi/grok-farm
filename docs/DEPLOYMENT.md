@@ -123,10 +123,17 @@ sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farmer.service > /etc/systemd/system/grok-farmer.service
 sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farm-backup.service > /etc/systemd/system/grok-farm-backup.service
+sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+  systemd/grok-farm-health.service > /etc/systemd/system/grok-farm-health.service
 cp systemd/grok-farm-backup.timer /etc/systemd/system/
+cp systemd/grok-farm-health.timer /etc/systemd/system/
 systemctl daemon-reload
+systemctl enable --now grok-farm-backup.timer
+systemctl enable --now grok-farm-health.timer
 # Do NOT start farmer until .env + proxies ready
 ```
+
+`deploy_farm_vps.sh` installs farmer + backup + health units the same way (farmer **not** restarted).
 
 ### 2.6 One-shot test (before unlimited loop)
 
@@ -230,6 +237,21 @@ Identity (decrypt): laptop + optional `/root/.config/grok-farm/age.identity` (60
 
 ---
 
+## 6b. Health timer units
+
+| Unit | Schedule | Action |
+|------|----------|--------|
+| `grok-farm-health.service` | oneshot | `scripts/health_check.sh` → `check_status.py --json` (no probe/mark-error) |
+| `grok-farm-health.timer` | `*:0/15` + ≤2m random delay | enable with `systemctl enable --now grok-farm-health.timer` |
+
+- Log: `~/grok-farm/logs/health_check.log`
+- Webhook on exit 2 when `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` set (optional)
+- Does **not** restart or stop `grok-farmer`
+
+Manual oneshot: `sudo systemctl start grok-farm-health.service`
+
+---
+
 ## 7. Post-deploy checklist
 
 - [ ] `systemctl is-active grok-farmer` → **active**
@@ -240,6 +262,8 @@ Identity (decrypt): laptop + optional `/root/.config/grok-farm/age.identity` (60
 - [ ] `grep 'Brutal Farmer v5' farm_brutal.log`
 - [ ] `python3 sync_proxies_from_9r.py` → count > 0
 - [ ] `python3 check_status.py` — identity pool, proxies, backup status
+- [ ] `systemctl is-active grok-farm-health.timer` → **active**
+- [ ] `bash scripts/health_check.sh` or oneshot unit; log in `logs/health_check.log`
 - [ ] Mid-drain or post-batch `SUMMARY N ok 0 fail`
 - [ ] 9router grok-cli connections grow
 - [ ] Grok model via non-EU proxy on gateway
