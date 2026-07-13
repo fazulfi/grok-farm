@@ -16,8 +16,10 @@ from db_schema import DEFAULT_DB, migrate
 from email_identity import domain_counts_from_emails, load_identity_pool
 from log_redact import redact_proxy_url
 from token_util import (
+    ensure_probe_columns,
     ensure_token_columns,
     mark_expired_accounts,
+    probe_accounts,
     token_health,
     update_account_token_meta,
 )
@@ -29,6 +31,30 @@ BACKUP_LOG = FARM / "logs" / "s3_backup.log"
 WANT_JSON = "--json" in sys.argv
 MARK_EXPIRED = "--mark-expired" in sys.argv
 MARK_EXPIRED_INJECTED = "--mark-expired-injected" in sys.argv
+RUN_PROBE = "--probe" in sys.argv
+
+
+def _probe_limit_from_argv() -> int:
+    """--probe-limit N or GROK_PROBE_LIMIT or default 20 when --probe."""
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a == "--probe-limit" and i + 1 < len(argv):
+            try:
+                return max(1, int(argv[i + 1]))
+            except ValueError:
+                break
+        if a.startswith("--probe-limit="):
+            try:
+                return max(1, int(a.split("=", 1)[1]))
+            except ValueError:
+                break
+    raw = (os.environ.get("GROK_PROBE_LIMIT") or "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 20
 
 
 def identity_report() -> dict:
@@ -161,6 +187,7 @@ def main() -> int:
     conn = sqlite3.connect(str(DB))
     conn.row_factory = sqlite3.Row
     migrate(conn)
+    ensure_probe_columns(conn)
 
     total = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
     by_status = {
@@ -186,6 +213,18 @@ def main() -> int:
             ).fetchall()
         }
         token_counts = refresh_token_health(conn)
+
+    probe_stats = None
+    if RUN_PROBE:
+        probe_stats = probe_accounts(
+            conn,
+            statuses=("injected",),
+            limit=_probe_limit_from_argv(),
+            dry_run=False,
+            mark=True,
+            skip_expired=True,
+            mark_error=False,
+        )
 
     top_proxies = []
     try:
@@ -246,6 +285,27 @@ def main() -> int:
         """SELECT COUNT(*) FROM accounts
            WHERE status='farmed' AND token_health='expired'"""
     ).fetchone()[0]
+
+    # Live probe inventory (soft): needs_relogin flag + last_probe_status breakdown
+    needs_relogin_count = 0
+    probe_status_breakdown: dict[str, int] = {}
+    try:
+        needs_relogin_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM accounts WHERE needs_relogin=1"
+            ).fetchone()[0]
+            or 0
+        )
+        for r in conn.execute(
+            """SELECT last_probe_status, COUNT(*) FROM accounts
+               WHERE last_probe_status IS NOT NULL AND last_probe_status != ''
+               GROUP BY last_probe_status"""
+        ).fetchall():
+            key, cnt = r[0], r[1]
+            if key:
+                probe_status_breakdown[str(key)] = int(cnt)
+    except sqlite3.Error:
+        pass
     conn.close()
 
     id_cfg = identity_report()
@@ -260,6 +320,12 @@ def main() -> int:
         "error": by_status.get("error", 0),
     }
     report["token_health"] = token_counts
+    report["probe"] = {
+        "needs_relogin": needs_relogin_count,
+        "last_probe_status": probe_status_breakdown,
+    }
+    if probe_stats is not None:
+        report["probe_run"] = probe_stats
     report["proxy_stats_top"] = top_proxies
     report["domain_stats"] = domain_health
     report["recent"] = recent
@@ -281,6 +347,9 @@ def main() -> int:
     elif token_counts.get("expired", 0) > 50:
         # soft inventory signal only — does not fail inject of healthy farmed
         issues.append("many_expired_tokens")
+    if needs_relogin_count > 0:
+        # soft inventory — re-auth needed; does not stop farmer
+        issues.append("needs_relogin")
     if report["backup"].get("status") in ("stale", "no_log"):
         issues.append("backup_" + str(report["backup"].get("status")))
     disk = report.get("disk") or {}
@@ -305,6 +374,18 @@ def main() -> int:
         f"farmed={a['farmed']} error={a['error']}"
     )
     print(f"tokens:     {token_counts}")
+    print(
+        f"probe:      needs_relogin={needs_relogin_count} "
+        f"last_status={probe_status_breakdown or {}}"
+    )
+    if probe_stats is not None:
+        by = probe_stats.get("by_status") or {}
+        print(
+            f"probe_run:  scanned={probe_stats.get('scanned')} "
+            f"alive={by.get('alive', 0)} needs_relogin={by.get('needs_relogin', 0)} "
+            f"jwt_expired={by.get('jwt_expired', 0)} "
+            f"network_error={by.get('network_error', 0)}"
+        )
     if mark_stats is not None:
         print(
             f"mark_exp:   marked_error={mark_stats.get('marked_error')} "
