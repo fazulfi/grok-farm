@@ -105,7 +105,12 @@ age -d -i ~/.config/grok-farm/age.identity -o restore.tgz backup.tgz.age
 
 ### Alerts
 
-Optional webhook (Discord-compatible JSON `content` field). Wired in `alerts.py` + `workflow.py` (empty proxy pool, inject all-fail / partial / error). **Do not invent a fake webhook** — leave unset if unused.
+Optional webhook (Discord-compatible JSON `content` field). Wired in:
+
+- `alerts.py` + `workflow.py` (empty proxy pool, inject all-fail / partial / error)
+- **`scripts/health_check.sh`** via `grok-farm-health.timer` (inventory `check_status` exit 2 / failure)
+
+**Do not invent a fake webhook** — leave unset if unused.
 
 ```bash
 # .env (optional)
@@ -114,7 +119,7 @@ GROK_ALERT_WEBHOOK=https://discord.com/api/webhooks/...
 # GROK_FARM_ALERT_WEBHOOK=...
 ```
 
-Bodies pass through `log_redact` (no full JWT / proxy user:pass).
+Bodies pass through `log_redact` (no full JWT / proxy user:pass). Health timer posts only issue codes + account counts (no tokens).
 
 ### Windows age CLI (operator laptop)
 

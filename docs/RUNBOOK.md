@@ -490,3 +490,56 @@ Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
 - Keep Gmail App Passwords + `GROK_PASSWORD` in password manager
 - Keep `age.identity` offline (laptop ACL locked)
 - Optional: restore S3 `backup.env` for offsite age archives
+
+---
+
+## R17 — Health timer / exit 2 webhook
+
+**Symptoms:** Discord/Telegram alert “health check unhealthy”; `logs/health_check.log` shows `exit_code=2`; timer failed / inactive.
+
+### What the timer does
+
+| Item | Value |
+|------|--------|
+| Units | `grok-farm-health.service` + `grok-farm-health.timer` |
+| Schedule | every 15 min (`*:0/15`, RandomizedDelaySec ≤2m) |
+| Script | `scripts/health_check.sh` |
+| Check | `check_status.py --json` only — **no** `--probe`, **no** `--mark-error` |
+| Alert | `alerts.send_alert` if exit ≠ 0 and webhook set |
+| Ban risk | **zero** (inventory / local files / systemctl only) |
+
+### Triage
+
+| Step | Action |
+|------|--------|
+| 1 | `systemctl status grok-farm-health.timer --no-pager` — should be active |
+| 2 | `tail -80 ~/grok-farm/logs/health_check.log` |
+| 3 | `cd ~/grok-farm && python3 check_status.py` — read `ISSUES:` line |
+| 4 | Map issue → existing runbook (below) |
+
+| Issue code | Follow |
+|------------|--------|
+| `farmer_not_active` | R1 / `systemctl status grok-farmer` |
+| `backup_stale` / `backup_no_log` | backup log + R12 / SECURITY |
+| `disk_high` | free disk; CAPACITY |
+| `farmed_expired_tokens` / `many_expired_tokens` | **R10** |
+| `needs_relogin` | soft inventory — **R13** (do not auto reauth) |
+| `large_farmed_backlog` | run `workflow.py` / check 9router SSH |
+| `identity_config_error` / `no_email_domains` | `.env` / `identities.json` |
+
+### Manual oneshot
+
+```bash
+sudo systemctl start grok-farm-health.service
+# or as farmer:
+cd ~/grok-farm && bash scripts/health_check.sh; echo exit=$?
+```
+
+### Enable after deploy
+
+```bash
+# deploy_farm_vps.sh enables timer; or:
+sudo systemctl enable --now grok-farm-health.timer
+```
+
+**Do not** stop `grok-farmer` to “fix” health noise.
