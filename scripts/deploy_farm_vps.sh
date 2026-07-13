@@ -46,16 +46,37 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "WARN: created .env from example — edit before farming"
 fi
-# refresh systemd unit if present
-if [[ -f systemd/grok-farmer.service ]]; then
-  UNIT=/tmp/grok-farmer.service.\$\$
-  sed "s/magadirxwin/\$USER/g; s|/home/magadirxwin|\$HOME|g" systemd/grok-farmer.service > "\$UNIT"
-  sudo cp "\$UNIT" /etc/systemd/system/grok-farmer.service
-  rm -f "\$UNIT"
-  sudo systemctl daemon-reload
-  echo "systemd unit updated (not restarted — run: sudo systemctl restart grok-farmer)"
+# refresh systemd units if present (farmer not restarted; timers enabled)
+install_unit() {
+  local src="\$1" dest_name="\$2"
+  if [[ ! -f "\$src" ]]; then
+    return 0
+  fi
+  local tmp
+  tmp=/tmp/\${dest_name}.\$\$
+  if [[ "\$src" == *.timer ]]; then
+    cp "\$src" "\$tmp"
+  else
+    sed "s/magadirxwin/\$USER/g; s|/home/magadirxwin|\$HOME|g" "\$src" > "\$tmp"
+  fi
+  sudo cp "\$tmp" "/etc/systemd/system/\${dest_name}"
+  rm -f "\$tmp"
+}
+
+install_unit systemd/grok-farmer.service grok-farmer.service
+install_unit systemd/grok-farm-backup.service grok-farm-backup.service
+install_unit systemd/grok-farm-backup.timer grok-farm-backup.timer
+install_unit systemd/grok-farm-health.service grok-farm-health.service
+install_unit systemd/grok-farm-health.timer grok-farm-health.timer
+sudo systemctl daemon-reload
+if [[ -f systemd/grok-farm-backup.timer ]]; then
+  sudo systemctl enable --now grok-farm-backup.timer
 fi
+if [[ -f systemd/grok-farm-health.timer ]]; then
+  sudo systemctl enable --now grok-farm-health.timer
+fi
+echo "systemd units refreshed (farmer NOT restarted — run: sudo systemctl restart grok-farmer if needed)"
 echo "OK deploy complete on \$(hostname)"
 EOF
 
-echo "Done. Next on VPS: edit .env, then sudo systemctl enable --now grok-farmer"
+echo "Done. Next on VPS: edit .env if needed; farmer not auto-restarted. Health/backup timers enabled when units present."
