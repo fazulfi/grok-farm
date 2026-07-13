@@ -5,8 +5,30 @@ All notable changes to Grok Farm are documented here.
 ## [Unreleased]
 
 ### Planned
-- Re-farm / re-auth automation for `status=error` + `notes=token_expired` (gateway-side revoke optional)
+- Re-farm / re-auth automation for `status=error` + `notes=token_expired` / `needs_relogin` (browser path optional)
 - Optional health-check systemd timer → webhook when `GROK_ALERT_WEBHOOK` set
+
+## [2.2.0] — 2026-07-13
+
+### Added
+- **Live JWT probe** (`token_util.probe_access_token` / `probe_accounts`, CLI `probe_tokens.py`): `GET https://api.x.ai/v1/models` with Bearer access token; soft meta only by default
+- Account columns: `last_probe_at`, `last_probe_status`, `last_probe_http`, `needs_relogin` (via `ensure_probe_columns` in `db_schema.migrate`)
+- Probe statuses: `alive` | `needs_relogin` | `rate_limited` | `spend_limited` | `network_error` | `invalid` | `missing` | `jwt_expired`
+- `check_status.py --probe` / `--probe-limit N`: inventory probe + soft `needs_relogin` issue; print probe breakdown
+- **9router reconcile**: `ops/list_grok_connections.py` (gateway JSONL, no tokens) + farm `reconcile_9router.py` (SSH diff buckets)
+- **Adaptive concurrent** (`adaptive_concurrent.py`): scores `domain_stats` + `proxy_stats` → concurrent in \[MIN, MAX\]; `brutal_farmer.sh` reads `--print` each batch
+- RUNBOOK **R13** probe, **R14** reconcile, **R15** adaptive concurrent
+- INTEGRATION-9ROUTER §8 inventory reconcile
+- `.env.example`: `GROK_ADAPTIVE_CONCURRENT`, `GROK_CONCURRENT_MIN/MAX`, `GROK_PROBE_*`
+
+### Changed
+- Soft inventory policy extended: live probe never flips `injected`→`error` unless explicit `--mark-error`
+- Offline JWT `expired` still skippable for live HTTP (`GROK_PROBE_SKIP_EXPIRED=1` default)
+- Health CLI exit 2 includes soft `needs_relogin` when any account flagged
+
+### Security
+- Probe/reconcile never log full JWT or gateway tokens; list helper prints `has_token` only
+- Reconcile default is dry report; `--write-notes` soft; `--mark-error` farmed-only
 
 ## [2.1.2] — 2026-07-13
 

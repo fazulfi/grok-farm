@@ -28,6 +28,27 @@ Schema migrations are additive via `db_schema.migrate()` (import/workflow/health
 | `notes` | TEXT | Freeform (e.g. `token_expired`) |
 | `token_exp` | INTEGER | JWT `exp` unix seconds (nullable) |
 | `token_health` | TEXT | `ok` \| `expiring_soon` \| `expired` \| `invalid` \| `missing` |
+| `last_probe_at` | TEXT | ISO UTC of last live probe (nullable) |
+| `last_probe_status` | TEXT | Live probe result (see probe statuses) |
+| `last_probe_http` | INTEGER | HTTP status from last probe (nullable) |
+| `needs_relogin` | INTEGER | `1` if live probe says re-auth needed; `0` if last probe `alive`; unchanged on transient |
+
+Probe columns are additive via `token_util.ensure_probe_columns` (called from `db_schema.migrate`).
+
+### Live probe statuses (`last_probe_status`)
+
+| Status | Meaning |
+|--------|---------|
+| `alive` | API accepted Bearer (HTTP 2xx) |
+| `needs_relogin` | HTTP 401/403 — token rejected (soft inventory; optional hard mark) |
+| `rate_limited` | HTTP 429 |
+| `spend_limited` | Spending / quota style body or 402-class |
+| `network_error` | Transport / timeout |
+| `invalid` | Malformed token or unexpected response |
+| `missing` | Empty access token |
+| `jwt_expired` | Offline JWT `exp` passed (skip live HTTP when `GROK_PROBE_SKIP_EXPIRED=1`) |
+
+**Soft default:** probe updates meta only. Never set `status=error` on `injected` unless operator passes `--mark-error` (CLI) — preserves 9router connection IDs.
 
 ### Table `proxy_stats`
 

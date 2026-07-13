@@ -165,15 +165,65 @@ Gateway host in DE/EU **must not** egress Grok 4.5 without proxy.
 
 ---
 
-## 8. Acceptance tests
+## 8. Reconcile inventory (gateway vs farm)
+
+Diff **9router `providerConnections`** against farm **`akun.db`** without printing tokens.
+
+### 8.1 Gateway helper — `list_grok_connections.py`
+
+Deploy to gateway (same pattern as `list_proxies.py` / inject):
+
+- Source: `ops/list_grok_connections.py` → typically `/root/list_grok_connections.py`
+- Reads `/var/lib/9router/db/data.sqlite` (`GROK_9R_DB` override)
+- Prints **JSONL** lines for `provider IN ('grok-cli','xai')`:
+
+```json
+{"email","provider","id","isActive","name","token_health","token_exp","has_token"}
+```
+
+- `grok-cli`: JWT `exp` from `data.accessToken` (base64 payload only, no verify)
+- `xai`: JWT `exp` from `data.apiKey` when it looks like a JWT
+- **Never** prints access/refresh tokens or api keys
+- Flags: `--provider grok-cli|xai|both` (default both)
+
+```bash
+# On gateway
+python3 /root/list_grok_connections.py
+python3 /root/list_grok_connections.py --provider grok-cli
+```
+
+### 8.2 Farm host — `reconcile_9router.py`
+
+- SSH same as `workflow.py`: `GROK_9R_SSH`, `GROK_9R_SSH_PORT`, `GROK_9R_SSH_KEY`
+- Remote command: `python3 /root/list_grok_connections.py`  
+  (path override: `GROK_9R_LIST_CONNECTIONS`)
+- Loads `akun.db` accounts (`email`, `status`, `token_health`, `needs_relogin` if present / notes, `grok_cli_connection_id`, `ninerouter_name`)
+- Report buckets: `in_both_ok`, `in_db_not_gateway`, `in_gateway_not_db`, `jwt_expired_both`, `needs_relogin_db`, `inactive_gateway`, `duplicate_emails_gateway`
+- CLI: `--json`, `--db`, `--limit-print N`
+- Optional `--write-notes`: soft-set `notes` containing `gateway_missing` for `in_db_not_gateway` (does **not** change `status` unless `--mark-error`, which only marks **farmed** rows → `error`)
+- Default: **dry report only** — never deletes gateway connections
+
+```bash
+# From farm user
+python3 reconcile_9router.py
+python3 reconcile_9router.py --json --limit-print 5
+python3 reconcile_9router.py --write-notes              # soft notes only
+python3 reconcile_9router.py --write-notes --mark-error # farmed missing-on-gateway → error
+```
+
+---
+
+## 9. Acceptance tests
 
 ```bash
 # From farm user
 python3 sync_proxies_from_9r.py    # count > 0
 python3 workflow.py                # SUMMARY N ok 0 fail (if pending)
+python3 reconcile_9router.py       # dry inventory diff (optional ops)
 
 # On gateway
 test $(sqlite3 ... "SELECT COUNT(*) FROM proxyPools;") -ge 1
+python3 /root/list_grok_connections.py | head
 curl -s localhost:20128/api/health | grep ok
 ```
 
@@ -181,9 +231,11 @@ Dashboard: **Providers → Grok CLI (Grok Build)** shows N connections with prox
 
 ---
 
-## 9. Versioning
+## 10. Versioning
 
 | Farm version | Injector | Notes |
 |--------------|----------|-------|
 | 1.x | manual / xai only | Legacy |
 | 2.0 | bulk JSONL + grok-cli | Current production |
+| 2.0+ | + list_grok_connections / reconcile_9router | Inventory reconcile |
+| 2.2.0 | + live JWT probe meta + adaptive concurrent | Soft needs_relogin; R13–R15 |

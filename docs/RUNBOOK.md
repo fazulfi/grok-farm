@@ -307,6 +307,103 @@ If age is not on PATH, decrypt on Linux/VPS that has the vaulted identity.
 
 ---
 
+## R13 — Live token probe / `needs_relogin` inventory
+
+**Goal:** Know which injected JWTs still work against xAI **without** full browser re-auth.
+
+**Endpoint:** `GET https://api.x.ai/v1/models` with `Authorization: Bearer <access_token>` (stdlib only).
+
+```bash
+cd ~/grok-farm
+# Soft inventory (default): write last_probe_* + needs_relogin; do NOT status=error
+python3 probe_tokens.py --limit 50
+python3 probe_tokens.py --json --limit 20
+python3 probe_tokens.py --dry-run --limit 5   # no DB writes
+
+# Via health CLI
+python3 check_status.py --probe --probe-limit 20
+python3 check_status.py --json | jq '.probe, .probe_run, .issues'
+
+# Optional hard mark (rare): status=error notes=needs_relogin
+python3 probe_tokens.py --mark-error --limit 10
+```
+
+| Flag / env | Default | Effect |
+|------------|---------|--------|
+| `--dry-run` | off | Probe only, no meta write |
+| `--limit N` | all matching | Cap work / rate |
+| `--include-farmed` | off | Also probe `status=farmed` |
+| `--no-skip-expired` | off | Force HTTP even if offline JWT expired |
+| `--mark-error` | **off** | Hard `status=error` on `needs_relogin` |
+| `GROK_PROBE_SKIP_EXPIRED` | `1` | Short-circuit expired JWT → `jwt_expired` |
+| `GROK_PROBE_TIMEOUT` | ~15s | HTTP timeout |
+| `GROK_PROBE_LIMIT` | 20 | Default for `check_status --probe` |
+
+**Interpretation:**
+
+- `needs_relogin=1` → soft issue on `check_status` (exit 2). Account still `injected`; gateway connection may still exist.
+- `jwt_expired` offline ≠ ban; Discord FYI: re-login, not “coid”.
+- Full browser re-auth is **out of scope** for v2.2.0 — use inventory to decide later.
+
+**Do not:** mass `--mark-error` on injected without a re-auth plan (loses inject queue semantics).
+
+---
+
+## R14 — Reconcile 9router vs `akun.db`
+
+**Goal:** Diff gateway connections vs farm DB without printing tokens.
+
+```bash
+# Once: deploy list helper to gateway (same pattern as inject helpers)
+scp -P 39999 ops/list_grok_connections.py root@49.12.82.34:/root/list_grok_connections.py
+
+# On farm
+python3 reconcile_9router.py
+python3 reconcile_9router.py --json --limit-print 5
+python3 reconcile_9router.py --write-notes              # soft notes gateway_missing
+# farmed-only hard mark if missing on gateway:
+python3 reconcile_9router.py --write-notes --mark-error
+```
+
+| Bucket | Meaning |
+|--------|---------|
+| `in_both_ok` | Email in DB + gateway, healthy enough |
+| `in_db_not_gateway` | Farm has row; gateway missing |
+| `in_gateway_not_db` | Gateway orphan (not in akun.db) |
+| `jwt_expired_both` | Both sides show expired JWT meta |
+| `needs_relogin_db` | Farm `needs_relogin=1` |
+| `inactive_gateway` | Gateway `isActive` false |
+| `duplicate_emails_gateway` | Dup emails on gateway |
+
+Default = **dry report only**. Never deletes gateway rows.
+
+See `docs/INTEGRATION-9ROUTER.md` §8.
+
+---
+
+## R15 — Adaptive concurrent (1–5)
+
+**Goal:** Scale Camoufox workers per batch from live `domain_stats` + `proxy_stats` without editing systemd.
+
+```bash
+python3 adaptive_concurrent.py --print   # single int for shell
+python3 adaptive_concurrent.py --json    # scores + decision
+
+# brutal_farmer.sh (each batch):
+# CONCURRENT=$(python3 adaptive_concurrent.py --print 2>/dev/null || echo "$CONCURRENT")
+```
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `GROK_CONCURRENT` | 3 | Base / floor input |
+| `GROK_ADAPTIVE_CONCURRENT` | `1` | `0` = fixed base only |
+| `GROK_CONCURRENT_MIN` | 1 | Floor |
+| `GROK_CONCURRENT_MAX` | 5 | Ceiling (RAM / Turnstile) |
+
+Live-safe: next batch picks new concurrent; no `systemctl stop` required. Do not raise MAX without RAM/swap headroom (see CAPACITY).
+
+---
+
 ## Severity matrix
 
 | Sev | Example | Response time |

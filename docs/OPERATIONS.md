@@ -45,11 +45,16 @@ sqlite3 /var/lib/9router/db/data.sqlite \
    SELECT COUNT(*) FROM providerConnections WHERE provider='xai';"
 ```
 
-`check_status.py` reports: farmer unit, account counts, token health, proxy file lines, top `proxy_stats`, domain pool / `domain_stats`, disk, last backup log age, issues list. Exit `2` if unhealthy.
+`check_status.py` reports: farmer unit, account counts, token health, **live probe** (`needs_relogin` + last_probe_status), proxy file lines, top `proxy_stats`, domain pool / `domain_stats`, disk, last backup log age, issues list. Exit `2` if unhealthy (includes soft `needs_relogin` / `many_expired_tokens`).
 
 ```bash
 python3 check_status.py
 python3 check_status.py --json
+# Live probe sample (soft meta; default injected only)
+python3 check_status.py --probe --probe-limit 20
+python3 probe_tokens.py --limit 50
+python3 probe_tokens.py --dry-run --limit 5
+
 # Mark dead farmed JWTs as status=error (same as mark_expired_tokens.py)
 python3 check_status.py --mark-expired
 # Optional: also mark injected expired as error (inventory hygiene; no gateway revoke)
@@ -57,14 +62,22 @@ python3 check_status.py --mark-expired-injected
 
 python3 mark_expired_tokens.py --dry-run
 python3 mark_expired_tokens.py
+
+# Gateway vs DB inventory (no tokens printed)
+python3 reconcile_9router.py
+python3 reconcile_9router.py --json --limit-print 5
+
+# Adaptive concurrent decision for next farm batch
+python3 adaptive_concurrent.py --print
+python3 adaptive_concurrent.py --json
 ```
 
-See RUNBOOK **R10** for expired JWT policy.
+See RUNBOOK **R10** (expired JWT), **R13** (probe), **R14** (reconcile), **R15** (adaptive concurrent).
 
 ### 2.2 Expected steady state
 
 - `grok-farmer`: **active (running)**
-- Concurrent Camoufox parents ≈ `CONCURRENT` (e.g. 3)
+- Concurrent Camoufox parents ≈ adaptive `CONCURRENT` (base 3, bounds 1–5 when `GROK_ADAPTIVE_CONCURRENT=1`)
 - `workflow_pools` / `usa_proxies.txt` line count ≈ proxyPools count
 - `farmed` backlog near **0** after each successful inject cycle
 - Swap present if concurrent ≥ 3
