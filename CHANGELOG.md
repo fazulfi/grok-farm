@@ -8,6 +8,27 @@ All notable changes to Grok Farm are documented here.
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` / `needs_relogin` (browser path optional)
 - Optional health-check systemd timer → webhook when `GROK_ALERT_WEBHOOK` set
 
+## [2.2.1] — 2026-07-13
+
+### Added
+- **DR playbook rewrite** (`docs/MIGRATION.md`): PATH A age restore, PATH B rebuild `akun.db` from 9router, PATH C warm cutover, PATH D cold; live host map; validation gate; operator go-bag
+- `ops/export_9r_to_akun.py` — export active `grok-cli` connections → farm `akun.db` schema (run on gateway; no token print)
+- RUNBOOK **R16** farm VPS dead / rebuild pointer
+- `docs/DEPLOYMENT.md` production parity (least-privilege sudoers, quoted secrets, log ownership, backup units)
+- **Local age backup** (`scripts/local_age_backup.sh` + `systemd/grok-farm-backup.{service,timer}`): hourly encrypt to `~/grok-farm/backups/*.tgz.age` when S3 `backup.env` absent; writes `logs/s3_backup.log` for health CLI; auto-delegates to `s3_backup.sh` if keys present
+- Timer path for **offsite S3 age autobackup**: when `~/.config/grok-farm/backup.env` present, hourly unit runs `local_age_backup.sh` → `s3_backup.sh` → dated + `latest.tgz.age` + `LATEST.txt` under `s3://grok-farm/farm-vps/...` (retention via boto3)
+- `s3_backup.sh` prefers farm `.venv` python (boto3) and packs probe/adaptive/reconcile modules into archive
+- `workflow.py` accepts `GROK_9R_KEY` / `GROK_9R_PORT` aliases (live .env) in addition to `GROK_9R_SSH_KEY` / `GROK_9R_SSH_PORT`
+- `brutal_farmer.sh` **v5**: source `.env` + `.venv` python; **auto import+workflow** after each batch with writable log fallback; optional **mid-batch drain** (`GROK_MID_DRAIN_INTERVAL`, default 120s) so 9router gets accounts before batch ends; surface SUMMARY into `farm_brutal.log`
+- AGENTS live host map updated for CSA `168.144.137.240` + DR pointer R16
+
+### Fixed
+- **Auto inject broken on new VPS**: `workflow.log` / `farm_brutal.log` owned by **root** → `Permission denied` on `>> workflow.log` so post-batch import/inject never ran (farmer user). Chown logs to farmer; brutal falls back to `workflow_user.log` if unwritable.
+
+### Security
+- Offsite backup path remains encrypt-before-upload (`BACKUP_ENCRYPT=age`); `backup.env` stays VPS-only (never git)
+- DR export helper never prints tokens (counts only)
+
 ## [2.2.0] — 2026-07-13
 
 ### Added
