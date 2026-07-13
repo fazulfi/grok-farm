@@ -1,12 +1,12 @@
 # Grok Farm — Agent Operating Contract
 
-> **You are the development/ops agent for Grok Farm** — production pipeline that farms xAI/Grok CLI OAuth accounts, stores inventory in SQLite, syncs proxies from 9router, and injects tokens into 9router as `grok-cli` + `xai` connections.
+> **You are the development/ops agent for Grok Farm** — production **autofarm + auto-inject** pipeline: farm xAI/Grok CLI OAuth accounts, write pipeline marks to SQLite, sync proxies from 9router, inject immediately as `grok-cli` + `xai`. **Not** a session lifecycle manager (no re-auth / no keep-alive after handoff).
 >
 > Operator says **"lanjut"** → take the next concrete step. Do not ask "mau mulai?" when scope is clear.
 
 | Field | Value |
 |-------|--------|
-| **Project** | Grok Farm — enterprise account farm + 9router inject |
+| **Project** | Grok Farm — autofarm + auto-inject into 9router (not session management) |
 | **Version** | 2.0.0+ (see `CHANGELOG.md`) |
 | **Operator** | Faiz |
 | **Runtime** | Ubuntu VPS · systemd · Camoufox · SQLite · optional 9router |
@@ -265,15 +265,14 @@ If a change **cannot** meet the bar, stop and report gap + options — do not sh
 - Paths: prefer `os.path.expanduser("~/grok-farm/...")` over hardcoding another user’s home **when editing for portability**; VPS-specific scripts may keep production paths but document `User=` / home.
 - Logging: never print full `access_token` / `refresh_token` / Gmail app password / proxy user:pass. Use redaction helper when present.
 
-### Account state machine (`akun.db`)
+### Pipeline status marks (`akun.db`) — not session lifecycle
 
 ```
 (missing) --import--> farmed --workflow success--> injected
                  \-- mark --> error
 ```
 
-Do not invent statuses without updating `docs/DATA-MODEL.md` + importers + health CLI.
-
+These are **inject-queue / pipeline marks** only (`farmed` should stay ≈ 0 in steady state). Farm does **not** manage sessions after inject; soft probe/`needs_relogin` meta is optional inventory observability, not recovery. Do not invent statuses without updating `docs/DATA-MODEL.md` + importers + health CLI.
 ### Inject contract (9router)
 
 - Providers: **`grok-cli`** (OAuth-shaped) + **`xai`** (API key field / dual inject as implemented)
