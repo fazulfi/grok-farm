@@ -1,0 +1,22 @@
+{
+  "identities": [
+    {
+      "id": "primary",
+      "imap_user": "magadirxwin@gmail.com",
+      "imap_pass": "xxxx xxxx xxxx xxxx",
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993,
+      "domains": ["budgezen.com", "mypapyr.com"],
+      "weight": 1,
+      "enabled": true
+    },
+    {
+      "id": "secondary",
+      "imap_user": "other@gmail.com",
+      "imap_pass": "yyyy yyyy yyyy yyyy",
+      "domains": ["another-domain.com"],
+      "weight": 1,
+      "enabled": false
+    }
+  ]
+}

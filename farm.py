@@ -67,15 +67,21 @@ def _env_bool(key: str, default: bool = True) -> bool:
     raw = _env(key, "true" if default else "false").lower()
     return raw in ("1", "true", "yes", "on")
 
-IMAP_USER = _env("GROK_IMAP_USER")
-IMAP_PASS = _env("GROK_IMAP_PASS").replace(" ", "")
-IMAP_HOST = _env("GROK_IMAP_HOST", "imap.gmail.com")
-IMAP_PORT = int(_env("GROK_IMAP_PORT", "993") or "993")
-EMAIL_DOMAIN = _env("GROK_EMAIL_DOMAIN").lstrip("@")
-EMAIL_MODE = _env("GROK_EMAIL_MODE", "domain").lower()
+# Identity plane: multi-domain (+ optional multi-IMAP). See email_identity.py
+from email_identity import load_identity_pool  # noqa: E402
+
+IDENTITY_POOL = load_identity_pool(_ROOT)
+IMAP_USER = IDENTITY_POOL.default_imap.user or _env("GROK_IMAP_USER")
+IMAP_PASS = IDENTITY_POOL.default_imap.password or _env("GROK_IMAP_PASS").replace(" ", "")
+IMAP_HOST = IDENTITY_POOL.default_imap.host or _env("GROK_IMAP_HOST", "imap.gmail.com")
+IMAP_PORT = int(IDENTITY_POOL.default_imap.port or _env("GROK_IMAP_PORT", "993") or "993")
+# Legacy single-domain env still works; pool may hold many domains
+EMAIL_DOMAIN = (IDENTITY_POOL.domains[0] if IDENTITY_POOL.domains else _env("GROK_EMAIL_DOMAIN").lstrip("@"))
+EMAIL_DOMAINS = list(IDENTITY_POOL.domains)
+EMAIL_MODE = IDENTITY_POOL.mode
 if EMAIL_MODE not in ("plus_trick", "domain"):
     EMAIL_MODE = "domain"
-GMAIL_BASE = _env("GROK_GMAIL_BASE").lower() or IMAP_USER.lower()
+GMAIL_BASE = IDENTITY_POOL.gmail_base_for_plus() or _env("GROK_GMAIL_BASE").lower() or IMAP_USER.lower()
 ACCOUNT_PASSWORD = _env("GROK_PASSWORD", "$Priyo000")
 MAX_ACCOUNTS = int(_env("GROK_MAX_ACCOUNTS", "5") or "5")
 CONCURRENT = int(_env("GROK_CONCURRENT", "1") or "1")
@@ -702,6 +708,10 @@ def init_batch(max_accounts: int, concurrent: int) -> str:
         "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "email_mode": EMAIL_MODE,
         "email_domain": EMAIL_DOMAIN if EMAIL_MODE == "domain" else None,
+        "email_domains": EMAIL_DOMAINS if EMAIL_MODE == "domain" else [],
+        "email_domain_strategy": IDENTITY_POOL.strategy,
+        "identity_source": IDENTITY_POOL.source,
+        "identity_count": len(IDENTITY_POOL.identities),
         "max_accounts": max_accounts,
         "concurrent": concurrent,
         "email_local_len": EMAIL_LOCAL_LEN,
@@ -712,16 +722,60 @@ def init_batch(max_accounts: int, concurrent: int) -> str:
     return BATCH_ID
 
 
+def _domain_skip_set() -> set[str]:
+    """Load unhealthy domains from domain_stats (fail-open on any DB error)."""
+    try:
+        from db_schema import connect, domains_to_skip, migrate
+
+        conn = connect()
+        migrate(conn)
+        skip = domains_to_skip(conn)
+        conn.close()
+        return skip
+    except Exception:
+        return set()
+
+
+def _record_domain_outcome(email_addr: str, success: bool) -> None:
+    """Best-effort domain_stats update after farm attempt (OTP/signup)."""
+    if not email_addr or "@" not in email_addr:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        from db_schema import record_domain_result_standalone
+
+        domain = email_addr.rsplit("@", 1)[-1]
+        when = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        record_domain_result_standalone(domain, success, email=email_addr, when_iso=when)
+    except Exception:
+        pass
+
+
 async def generate_email() -> str:
-    """Crypto-random unique email; reserved in global set + used_emails.txt."""
+    """Crypto-random unique email; multi-domain pool when GROK_EMAIL_DOMAINS set.
+
+    Reserved in global set + used_emails.txt. Domain pick: random or round_robin
+    (GROK_EMAIL_DOMAIN_STRATEGY). Unhealthy domains (domain_stats consecutive OTP
+    fails) are skipped. IMAP for OTP resolved per domain via identity pool.
+    """
+    skip = _domain_skip_set()
     async with _emails_lock:
         for _ in range(200):
             if EMAIL_MODE == "domain":
-                if not EMAIL_DOMAIN:
-                    raise RuntimeError("GROK_EMAIL_DOMAIN required for domain mode")
+                if not EMAIL_DOMAINS and not EMAIL_DOMAIN:
+                    raise RuntimeError(
+                        "GROK_EMAIL_DOMAINS or GROK_EMAIL_DOMAIN required for domain mode"
+                    )
+                try:
+                    domain = IDENTITY_POOL.pick_domain(skip_domains=skip)
+                except RuntimeError:
+                    domain = EMAIL_DOMAIN.lstrip("@")
+                if not domain:
+                    raise RuntimeError("No domain available in identity pool")
                 # secrets-based alnum (not random.choices) + global used set
                 name = _crypto_local_part(EMAIL_LOCAL_LEN)
-                addr = f"{name}@{EMAIL_DOMAIN.lstrip('@')}"
+                addr = f"{name}@{domain.lstrip('@')}"
             else:
                 base = GMAIL_BASE or IMAP_USER
                 if not base or "@" not in base:
@@ -808,18 +862,28 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
     Codes arrive from noreply@x.ai with subject like "K35-1QR xAI confirmation code".
     Catch-all domains forward into this inbox; match To/Delivered-To/body for the alias.
     Concurrent workers: each OTP code is claimed once (no double-use of same mail).
+    Multi-identity: IMAP host/user resolved from identity pool by email domain.
     """
-    print(f"[IMAP] Waiting for xAI OTP to {target_email}...", flush=True)
+    creds = IDENTITY_POOL.imap_for_email(target_email)
+    imap_user, imap_pass = creds.user, creds.password
+    imap_host, imap_port = creds.host, int(creds.port)
+    print(
+        f"[IMAP] Waiting for xAI OTP to {target_email} via {imap_user} on {imap_host}...",
+        flush=True,
+    )
     start = time.time()
     since_ts = since_ts or (start - 30)
     target_lower = target_email.lower()
     target_local = target_lower.split("@")[0]
+    target_domain = target_lower.split("@")[-1] if "@" in target_lower else ""
     seen_uids: set[bytes] = set()
+    scanned_xai = 0
+    near_misses = 0
 
     while time.time() - start < timeout:
         try:
-            mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-            mail.login(IMAP_USER, IMAP_PASS)
+            mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+            mail.login(imap_user, imap_pass)
             mail.select("INBOX")
             status, messages = mail.search(None, '(FROM "x.ai")')
             msg_ids = messages[0].split() if messages and messages[0] else []
@@ -835,6 +899,7 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
                     continue
                 msg = message_from_bytes(data[0][1])
                 subject = msg.get("Subject", "") or ""
+                # Catch-all / Cloudflare Email Routing may stash original RCPT in many places
                 to_addr = " ".join(
                     filter(
                         None,
@@ -842,7 +907,12 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
                             msg.get("To", ""),
                             msg.get("Delivered-To", ""),
                             msg.get("X-Original-To", ""),
+                            msg.get("X-Forwarded-To", ""),
+                            msg.get("X-Forwarded-For", ""),
+                            msg.get("Envelope-To", ""),
+                            msg.get("Apparently-To", ""),
                             msg.get("Cc", ""),
+                            msg.get("Received", ""),
                         ],
                     )
                 ).lower()
@@ -869,9 +939,12 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
                     except Exception:
                         body = str(msg.get_payload() or "")
 
+                scanned_xai += 1
                 # Match recipient (catch-all alias, plus-trick, or body mention)
                 # Prefer header match; body match only if subject is clearly xAI confirmation
-                header_hit = target_lower in to_addr or target_local in to_addr
+                header_hit = target_lower in to_addr or (
+                    len(target_local) >= 8 and target_local in to_addr
+                )
                 body_l = body.lower()
                 body_hit = target_lower in body_l or (
                     len(target_local) >= 8 and target_local in body_l
@@ -880,6 +953,8 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
                     r"xAI\s+confirmation", subject or "", re.I
                 ))
                 if not header_hit and not (body_hit and subj_is_xai):
+                    if subj_is_xai and target_domain and target_domain in to_addr:
+                        near_misses += 1
                     seen_uids.add(mid)
                     continue
 
@@ -903,7 +978,12 @@ def read_otp_from_imap_sync(target_email: str, timeout: int = 180, since_ts: flo
         except Exception as e:
             print(f"[IMAP] Error: {e}", flush=True)
         time.sleep(4)
-    print("[IMAP] Timeout waiting for OTP", flush=True)
+    print(
+        f"[IMAP] Timeout waiting for OTP to {target_email} "
+        f"(scanned_xai={scanned_xai} near_domain_misses={near_misses}). "
+        f"If domain is new: verify catch-all MX → this IMAP inbox.",
+        flush=True,
+    )
     return None
 
 
@@ -2850,6 +2930,7 @@ async def _do_register(attempt_num: int) -> dict | None:
         )
         await save_result_to_file(result)
         emit_success(attempt_num, email_addr, "Account farmed (tokens saved)")
+        _record_domain_outcome(email_addr, True)
         return result
     except asyncio.TimeoutError:
         msg = f"account timeout after {ACCOUNT_TIMEOUT_S}s (stuck / unclear state)"
@@ -2859,6 +2940,7 @@ async def _do_register(attempt_num: int) -> dict | None:
             await save_failed_to_file(attempt_num, email_addr, msg)
         except Exception:
             pass
+        _record_domain_outcome(email_addr, False)
         return None
     except Exception as e:
         print(f"[{attempt_num}] FAILED: {e}", flush=True)
@@ -2867,6 +2949,9 @@ async def _do_register(attempt_num: int) -> dict | None:
             await save_failed_to_file(attempt_num, email_addr, str(e)[:400])
         except Exception:
             pass
+        # Count domain fail for OTP/catch-all issues; still record other fails so
+        # consecutive dead domains auto-skip (operator can re-enable after fix).
+        _record_domain_outcome(email_addr, False)
         return None
 
 
@@ -2961,10 +3046,12 @@ def _prompt_yes_no(label: str, default: bool = True) -> bool:
 
 async def main():
     if not IMAP_USER or not IMAP_PASS:
-        print("ERROR: set GROK_IMAP_USER and GROK_IMAP_PASS in .env", flush=True)
-        sys.exit(1)
-    if EMAIL_MODE == "domain" and not EMAIL_DOMAIN:
-        print("ERROR: set GROK_EMAIL_DOMAIN for domain mode", flush=True)
+        # multi-identity file may still provide IMAP; check pool
+        if not any(i.imap.user and i.imap.password for i in IDENTITY_POOL.identities):
+            print("ERROR: set GROK_IMAP_USER and GROK_IMAP_PASS in .env (or identities.json)", flush=True)
+            sys.exit(1)
+    if EMAIL_MODE == "domain" and not EMAIL_DOMAINS and not EMAIL_DOMAIN:
+        print("ERROR: set GROK_EMAIL_DOMAINS or GROK_EMAIL_DOMAIN for domain mode", flush=True)
         sys.exit(1)
     if EMAIL_MODE == "plus_trick" and not (GMAIL_BASE or IMAP_USER):
         print("ERROR: set GROK_GMAIL_BASE or GROK_IMAP_USER for plus_trick", flush=True)
@@ -2978,7 +3065,18 @@ async def main():
     print("=" * 60, flush=True)
     print(f"  Email mode : {EMAIL_MODE}", flush=True)
     if EMAIL_MODE == "domain":
-        print(f"  Domain     : @{EMAIL_DOMAIN}", flush=True)
+        if len(EMAIL_DOMAINS) > 1:
+            print(
+                f"  Domains    : {len(EMAIL_DOMAINS)} pool [{IDENTITY_POOL.strategy}] "
+                f"{', '.join('@' + d for d in EMAIL_DOMAINS)}",
+                flush=True,
+            )
+        else:
+            print(f"  Domain     : @{EMAIL_DOMAIN}", flush=True)
+        print(
+            f"  Identities : {len(IDENTITY_POOL.identities)} ({IDENTITY_POOL.source})",
+            flush=True,
+        )
     else:
         print(f"  Gmail base : {GMAIL_BASE or IMAP_USER}", flush=True)
     print(f"  IMAP       : {IMAP_USER} @ {IMAP_HOST}:{IMAP_PORT}", flush=True)
