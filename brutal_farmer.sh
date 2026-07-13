@@ -74,6 +74,20 @@ while true; do
     [[ -x "$PY" ]] || PY=python3
     ensure_logs
 
+    # 1a) Empty local proxy file → skip farm (inject already fail-closed on empty proxyPools)
+    PROXY_FILE="${GROK_PROXY_FILE:-$HOME/grok-farm/usa_proxies.txt}"
+    PROXY_FILE="${PROXY_FILE/#\~/$HOME}"
+    PROXY_N=0
+    if [ -f "$PROXY_FILE" ]; then
+        PROXY_N=$(grep -cE '^(https?://|socks5?://|[^#[:space:]].*:)' "$PROXY_FILE" 2>/dev/null || echo 0)
+    fi
+    if [ "${PROXY_N:-0}" -eq 0 ] 2>/dev/null; then
+        echo "[FARMER] WARN: proxy file empty ($PROXY_FILE) — skip farm this round, retry in ${BATCH_DELAY}s"
+        sleep "$BATCH_DELAY"
+        continue
+    fi
+    echo "[FARMER] proxy_file_lines=$PROXY_N"
+
     # 1b) Adaptive concurrent from domain_stats + proxy_stats (live-safe: next batch)
     if [ "${GROK_ADAPTIVE_CONCURRENT:-1}" != "0" ]; then
         CONCURRENT=$("$PY" adaptive_concurrent.py --print 2>/dev/null || echo "$CONCURRENT")
