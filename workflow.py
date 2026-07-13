@@ -292,14 +292,25 @@ def main() -> int:
             if tok:
                 update_account_token_meta(c2, email, tok)
         c2.commit()
-        # 2) Best-effort proxy scoring (never undo inject marks)
+        # 2) Best-effort proxy scoring + fail taxonomy (never undo inject marks)
         try:
+            from db_schema import classify_proxy_fail
+
+            err_blob = f"{r.stderr or ''}\n{r.stdout or ''}"
+            fail_class = classify_proxy_fail(err_blob) if failed else ""
             for email in ok_emails:
                 proxy = email_proxy.get(email, "")
                 record_proxy_result(c2, proxy, True, email=email, when_iso=ts)
             for email in failed:
                 proxy = email_proxy.get(email, "")
-                record_proxy_result(c2, proxy, False, email=email, when_iso=ts)
+                record_proxy_result(
+                    c2,
+                    proxy,
+                    False,
+                    email=email,
+                    when_iso=ts,
+                    fail_reason=fail_class or "unknown",
+                )
             c2.commit()
         except Exception as pe:
             safe_print(f"[WORKFLOW] proxy_stats update error (inject marks kept): {pe}")
