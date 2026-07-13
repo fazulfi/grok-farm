@@ -9,11 +9,23 @@ All notable changes to Grok Farm are documented here.
 - **Health-check systemd timer** (`systemd/grok-farm-health.{service,timer}` +
   `scripts/health_check.sh`): every 15 min runs inventory-only
   `check_status.py --json` (no `--probe` / `--mark-error`); logs
-  `logs/health_check.log`; webhook via `alerts.py` on exit 2 / failure when
-  `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` set
-- `deploy_farm_vps.sh` installs/enables backup + health timers (farmer unit
-  refreshed, **not** restarted)
-- Docs: OPERATIONS §1/§2.1/§10, DEPLOYMENT §2.5/§6b, SECURITY Alerts, RUNBOOK **R17**
+  `logs/health_check.log`
+- **Hard/soft health split:** `check_status` exit **0** healthy, **2** soft-only
+  (`needs_relogin`, `many_expired_tokens`, `proxy_pool_low`, …), **3** hard
+  (`farmer_not_active`, `proxy_file_empty`, `disk_high`, backlog, backup, …).
+  Webhook fires on **hard (3)** / unexpected failure only; soft is log-only
+- **Alert debounce** (`GROK_ALERT_DEBOUNCE_MIN`, default 60 min) via
+  `logs/alert_debounce/` fingerprint files
+- **Proxy soft-evict (fail-open):** `proxy_stats.consecutive_fails` + `disabled`;
+  `proxies_to_skip()`; score-weighted inject pick in `workflow.py`; never
+  auto-DELETE gateway `proxyPools`
+- **Empty local proxy file:** `brutal_farmer.sh` skips farm round (inject still
+  fail-closed on empty proxyPools)
+- **Soft timers:** `grok-farm-probe` (6h, no `--mark-error`),
+  `grok-farm-reconcile` (12h, report only), `grok-farm-mark-expired` (30m,
+  farmed-only)
+- `deploy_farm_vps.sh` installs/enables backup + health + probe + reconcile +
+  mark-expired timers (farmer **not** restarted)
 
 ### Changed
 
@@ -22,12 +34,16 @@ All notable changes to Grok Farm are documented here.
   DATA-MODEL pipeline marks / OPERATIONS steady state / RUNBOOK R10–R13 /
   SECURITY soft meta / INTEGRATION-9ROUTER re-inject wording / docs index —
   capacity recovery = re-farm + inject; soft probe/JWT = observability noise
+- Health unit `SuccessExitStatus=2 3` so soft/hard inventory outcomes do not
+  mark the oneshot unit failed
 
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
   `needs_relogin` (browser path optional) — **out of scope** for farm-only
   roadmap until operator re-enables
+- Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
+  (never product auto-evict)
 
 ## [2.2.2] — 2026-07-13
 
