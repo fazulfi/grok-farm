@@ -69,9 +69,11 @@ copy_if "$HOME/.ssh/id_ed25519" "$STAGE/ssh/id_ed25519"
 copy_if "$HOME/.ssh/id_ed25519.pub" "$STAGE/ssh/id_ed25519.pub"
 copy_if "$HOME/.ssh/config" "$STAGE/ssh/config"
 for f in brutal_farmer.sh workflow.py sync_proxies_from_9r.py import_db.py check_status.py \
-         log_redact.py token_util.py alerts.py db_schema.py; do
+         log_redact.py token_util.py alerts.py db_schema.py email_identity.py name_gen.py \
+         mark_expired_tokens.py; do
   copy_if "$FARM_DIR/$f" "$STAGE/app/$f"
 done
+copy_if "$FARM_DIR/identities.json" "$STAGE/credentials/identities.json"
 copy_if "$FARM_DIR/usa_proxies.txt" "$STAGE/app/usa_proxies.txt"
 if [[ -d "$FARM_DIR/results" ]]; then
   echo "  + results/"
@@ -138,37 +140,8 @@ echo "$STAMP $SIZE $KEY encrypt=$ENCRYPT" > "$WORK/LATEST.txt"
 $PYBIN "$PY_UPLOAD" "$WORK/LATEST.txt" "s3://${S3_BUCKET}/${S3_PREFIX}/${HOST}/LATEST.txt"
 echo "Upload OK"
 
-# Retention (list via aws cli if present)
-AWS_BIN="$(command -v aws || echo /usr/local/bin/aws)"
-if [[ -x "$AWS_BIN" ]] || command -v aws >/dev/null 2>&1; then
-  export RETENTION_DAYS S3_ENDPOINT S3_BUCKET S3_PREFIX HOST_NAME="$HOST" AWS_BIN
-  python3 - <<'PY'
-import os, subprocess, datetime, json
-endpoint=os.environ["S3_ENDPOINT"]
-bucket=os.environ["S3_BUCKET"]
-prefix=f'{os.environ["S3_PREFIX"]}/{os.environ["HOST_NAME"]}/'
-days=int(os.environ.get("RETENTION_DAYS","14"))
-aws=os.environ.get("AWS_BIN","aws")
-try:
-    out=subprocess.check_output([aws,"--endpoint-url",endpoint,"s3api","list-objects-v2","--bucket",bucket,"--prefix",prefix,"--output","json"], text=True)
-except Exception as e:
-    print(f"retention skip: {e}")
-    raise SystemExit(0)
-data=json.loads(out or "{}")
-cutoff=datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=days)
-deleted=0
-for obj in data.get("Contents") or []:
-    key=obj["Key"]
-    if key.endswith("LATEST.txt") or "/latest." in key:
-        continue
-    lm=obj.get("LastModified")
-    if isinstance(lm,str):
-        lm=datetime.datetime.fromisoformat(lm.replace("Z","+00:00"))
-    if lm and lm < cutoff:
-        subprocess.run([aws,"--endpoint-url",endpoint,"s3","rm",f"s3://{bucket}/{key}"], check=False)
-        deleted+=1
-print(f"retention deleted {deleted} objects older than {days}d")
-PY
-fi
+# Retention via boto3 (no aws CLI dependency)
+export RETENTION_DAYS S3_ENDPOINT S3_BUCKET S3_PREFIX HOST_NAME="$HOST"
+$PYBIN "$PY_UPLOAD" --retention --days "${RETENTION_DAYS}" || echo "retention warning: non-zero exit (backup already uploaded)"
 
 echo "======== $(date -Is) backup done ========"
