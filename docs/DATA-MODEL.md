@@ -52,26 +52,32 @@ Probe columns are additive via `token_util.ensure_probe_columns` (called from `d
 
 ### Table `proxy_stats`
 
-Tracks inject outcomes per proxy host (credentials stripped from key). Soft-evict
-mirrors `domain_stats` (local skip only; **never** auto-DELETE gateway `proxyPools`).
+Tracks **inject + farm** outcomes per proxy host (credentials stripped from key).
+Soft-evict mirrors `domain_stats` (local skip only; **never** auto-DELETE gateway
+`proxyPools`).
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `proxy_key` | TEXT PK | Scheme + host:port (no user:pass) |
-| `success_count` | INTEGER | Successful injects |
-| `fail_count` | INTEGER | Failed injects |
+| `success_count` | INTEGER | Successful inject/farm uses |
+| `fail_count` | INTEGER | Failed inject/farm uses |
 | `consecutive_fails` | INTEGER | Reset to 0 on success; used for soft-skip |
 | `last_success_at` | TIMESTAMP | Last success |
 | `last_fail_at` | TIMESTAMP | Last fail |
 | `last_email` | TEXT | Last related account email |
 | `score` | REAL | `success / (success+fail)` in \[0,1\] |
 | `disabled` | INTEGER | Manual disable flag (0/1); success clears auto path |
+| `last_fail_reason` | TEXT | Short taxonomy label (no secrets) |
 | `updated_at` | TIMESTAMP | Last update |
 
+**Fail taxonomy** (`classify_proxy_fail()`): `timeout` | `proxy_error` | `auth` |
+`region` | `rate_limit` | `ssh` | `gateway` | `token` | `unknown`.
+
 **Soft-skip rule:** `proxies_to_skip()` excludes proxies with `disabled=1` **or**
-`consecutive_fails >= GROK_PROXY_MAX_CONSECUTIVE_FAILS` (default **5**). Inject
-`workflow.pick_proxy()` score-weights the remainder; if all would be skipped, pick
-**fails open** to the full live list. Empty live proxyPools still **fail-closed**.
+`consecutive_fails >= GROK_PROXY_MAX_CONSECUTIVE_FAILS` (default **5**). Both
+`workflow.pick_proxy()` (inject) and `farm.next_proxy()` (farm) score-weight the
+remainder; if all would be skipped, pick **fails open** to the full list. Empty
+live proxyPools still **fail-closed** on inject.
 
 ### Table `domain_stats`
 
@@ -244,6 +250,8 @@ See `.env.example`. Critical keys:
 | GROK_AKUN_DB | ops | override path to `akun.db` |
 | GROK_FARM_DIR | ops | override farm home for health CLI |
 | GROK_ALERT_WEBHOOK | optional | Discord-style webhook for ops alerts |
+| GROK_TELEGRAM_BOT_TOKEN | optional | Telegram Bot API token (never commit) |
+| GROK_TELEGRAM_CHAT_ID | optional | Telegram chat/user id for alerts |
 | GROK_9R_SSH / GROK_9R_PORT / GROK_9R_KEY | ops | 9router SSH inject path |
 
 Backup-only (`~/.config/grok-farm/backup.env`, not in git):

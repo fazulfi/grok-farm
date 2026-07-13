@@ -4,6 +4,16 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Planned
+
+- Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
+  `needs_relogin` (browser path optional) — **out of scope** for farm-only
+  roadmap until operator re-enables
+- Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
+  (never product auto-evict)
+
+## [2.3.0] — 2026-07-14
+
 ### Added
 
 - **Health-check systemd timer** (`systemd/grok-farm-health.{service,timer}` +
@@ -13,12 +23,18 @@ All notable changes to Grok Farm are documented here.
 - **Hard/soft health split:** `check_status` exit **0** healthy, **2** soft-only
   (`needs_relogin`, `many_expired_tokens`, `proxy_pool_low`, …), **3** hard
   (`farmer_not_active`, `proxy_file_empty`, `disk_high`, backlog, backup, …).
-  Webhook fires on **hard (3)** / unexpected failure only; soft is log-only
+  Alerts fire on **hard (3)** / unexpected failure only; soft is log-only
 - **Alert debounce** (`GROK_ALERT_DEBOUNCE_MIN`, default 60 min) via
   `logs/alert_debounce/` fingerprint files
-- **Proxy soft-evict (fail-open):** `proxy_stats.consecutive_fails` + `disabled`;
-  `proxies_to_skip()`; score-weighted inject pick in `workflow.py`; never
-  auto-DELETE gateway `proxyPools`
+- **Telegram alerts:** `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID`
+  (Bot API `sendMessage`); Discord webhook still supported; never log token
+- **Proxy soft-evict (fail-open):** `proxy_stats.consecutive_fails` + `disabled` +
+  `last_fail_reason`; `proxies_to_skip()`; score-weighted pick on **inject**
+  (`workflow.pick_proxy`) **and farm** (`farm.next_proxy`); fail taxonomy
+  (`classify_proxy_fail`); never auto-DELETE gateway `proxyPools`
+- **Sync soft-filter:** gateway `ops/list_proxies.py` skips inactive / bad
+  `testStatus` when present; fail-open if filter empties; `sync_proxies_from_9r`
+  ignores `COUNT=` / `#` lines
 - **Empty local proxy file:** `brutal_farmer.sh` skips farm round (inject still
   fail-closed on empty proxyPools)
 - **Soft timers:** `grok-farm-probe` (6h, no `--mark-error`),
@@ -36,14 +52,8 @@ All notable changes to Grok Farm are documented here.
   capacity recovery = re-farm + inject; soft probe/JWT = observability noise
 - Health unit `SuccessExitStatus=2 3` so soft/hard inventory outcomes do not
   mark the oneshot unit failed
-
-### Planned
-
-- Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
-  `needs_relogin` (browser path optional) — **out of scope** for farm-only
-  roadmap until operator re-enables
-- Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
-  (never product auto-evict)
+- Farm path writes `proxy_stats` (best-effort) so soft-skip learns from farm
+  failures, not inject-only
 
 ## [2.2.2] — 2026-07-13
 

@@ -563,7 +563,7 @@ high `needs_relogin` / JWT expired inventory — not a farm outage.
 
 ## R18 — Proxy soft-evict (score-weighted pick; no gateway DELETE)
 
-**Symptoms:** inject fail rate high; `proxy_stats` many low scores / high
+**Symptoms:** inject/farm fail rate high; `proxy_stats` many low scores / high
 `consecutive_fails`; soft issue `proxy_many_soft_skipped` or `proxy_pool_low`;
 farm skipped after empty local proxy file.
 
@@ -572,10 +572,13 @@ farm skipped after empty local proxy file.
 | Item | Rule |
 |------|------|
 | Soft skip | `disabled=1` **or** `consecutive_fails >= GROK_PROXY_MAX_CONSECUTIVE_FAILS` (default **5**) |
-| Pick | `workflow.pick_proxy()` score-weighted among non-skipped |
-| Fail-open | if **all** proxies would be skipped → use full live list (never hard-stop inject on soft skip alone) |
+| Inject pick | `workflow.pick_proxy()` score-weighted among non-skipped (live proxyPools) |
+| Farm pick | `farm.next_proxy()` score-weighted + soft-skip on local file (fail-open) |
+| Fail taxonomy | `last_fail_reason`: timeout / proxy_error / auth / region / rate_limit / ssh / gateway / token / unknown |
+| Fail-open | if **all** proxies would be skipped → use full list (never hard-stop on soft skip alone) |
 | Empty live pool | still **fail-closed** (abort inject) — same as before |
 | Empty local file | `brutal_farmer` skips **farm** that round after sync |
+| Sync soft-filter | gateway `list_proxies.py` drops `isActive=0` / bad `testStatus` when present; fail-open if filter empties |
 | Gateway DELETE | **never automatic** — manual/CLI only (`proxy_cleaner` ops) |
 
 ### Triage
@@ -584,15 +587,15 @@ farm skipped after empty local proxy file.
 cd ~/grok-farm
 python3 check_status.py --json | jq '.proxy_soft_skip, .issues_soft, .issues_hard'
 sqlite3 akun.db \
-  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score
+  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score, last_fail_reason
    FROM proxy_stats ORDER BY consecutive_fails DESC, score ASC LIMIT 15;"
 # Refill gateway proxyPools (non-EU), then:
 python3 sync_proxies_from_9r.py
 ```
 
 **Do not** mass-DELETE `proxyPools` from the farm product path. Clear soft-skip by
-successful injects (resets consecutive_fails) or SQL `disabled=0` after fixing the
-node.
+successful inject/farm uses (resets consecutive_fails) or SQL `disabled=0` after
+fixing the node.
 
 ---
 

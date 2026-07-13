@@ -105,7 +105,7 @@ age -d -i ~/.config/grok-farm/age.identity -o restore.tgz backup.tgz.age
 
 ### Alerts
 
-Optional webhook (Discord-compatible JSON `content` field). Wired in:
+Optional channels (either or both). Wired in:
 
 - `alerts.py` + `workflow.py` (empty proxy pool, inject all-fail / partial / error)
 - **`scripts/health_check.sh`** via `grok-farm-health.timer` — inventory
@@ -113,17 +113,23 @@ Optional webhook (Discord-compatible JSON `content` field). Wired in:
   log-only). Debounced via `GROK_ALERT_DEBOUNCE_MIN` (default 60 min;
   `logs/alert_debounce/`).
 
+| Channel | Env | Notes |
+|---------|-----|-------|
+| Discord-style webhook | `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` | JSON `{"content":...}` |
+| Telegram Bot API | `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID` | `sendMessage`; **never** log/commit token |
+
 **Do not invent a fake webhook** — leave unset if unused.
 
 ```bash
 # .env (optional)
-GROK_ALERT_WEBHOOK=https://discord.com/api/webhooks/...
-# alias also accepted:
+# GROK_ALERT_WEBHOOK=https://discord.com/api/webhooks/...
 # GROK_FARM_ALERT_WEBHOOK=...
+# GROK_TELEGRAM_BOT_TOKEN=   # secret — chmod 600 .env
+# GROK_TELEGRAM_CHAT_ID=
 # GROK_ALERT_DEBOUNCE_MIN=60
 ```
 
-Bodies pass through `log_redact` (no full JWT / proxy user:pass). Health timer posts only hard issue codes + account counts (no tokens).
+Bodies pass through `log_redact` (no full JWT / proxy user:pass / bot token). Health timer posts only hard issue codes + account counts (no tokens).
 
 ### Windows age CLI (operator laptop)
 

@@ -5,7 +5,7 @@
 | | |
 |--|--|
 | **Status** | Production |
-| **Version** | 2.2.2+ |
+| **Version** | 2.3.0 |
 | **Runtime** | Ubuntu VPS · systemd · Camoufox · SQLite · optional 9router |
 | **Product scope** | **Farm → inject only** — not a session lifecycle manager |
 

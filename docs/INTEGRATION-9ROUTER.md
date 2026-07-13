@@ -57,7 +57,11 @@ CREATE TABLE proxyPools (
 ### Farm sync
 
 - Script: `sync_proxies_from_9r.py` (farm host)
-- Remote helper: `/root/list_proxies.py` prints one `proxyUrl` per line
+- Remote helper: `/root/list_proxies.py` prints `COUNT=N` then one `proxyUrl` per
+  line; soft-filters `isActive=0` / bad `testStatus` when those fields exist;
+  **fail-open** prints all URLs if the filter would empty the pool (never deletes
+  `proxyPools` rows)
+- Sync ignores `COUNT=` / `#` comment lines from the helper
 - Output: `usa_proxies.txt` as `host:port:user:pass` for `farm.py`
 
 ### Recommended pool content

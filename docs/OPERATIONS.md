@@ -325,11 +325,15 @@ sudo systemctl restart grok-farmer
 **Only 9router → Proxy Pools UI/DB.**
 
 - Add/remove pools on 9router
-- Next farmer loop runs `sync_proxies_from_9r.py`
-- Inject uses live pool list with **score-weighted pick** + soft-skip of high
-  `consecutive_fails` / `disabled` proxies (`proxies_to_skip()`; **fail-open** if
-  all would be skipped). Never auto-DELETE gateway `proxyPools`.
-- Inject success/fail recorded in `proxy_stats` (host-only key; mirrors domain auto-skip)
+- Next farmer loop runs `sync_proxies_from_9r.py` (gateway `list_proxies.py`
+  soft-filters `isActive=0` / bad `testStatus` when present; **fail-open** if
+  filter would empty the pool)
+- **Inject** uses live pool list with **score-weighted pick** + soft-skip
+  (`workflow.pick_proxy` + `proxies_to_skip()`; **fail-open** if all skipped)
+- **Farm** uses local file with same soft-skip + score-weight (`farm.next_proxy`;
+  **fail-open**); never empties pool via soft skip alone
+- Inject/farm success/fail → `proxy_stats` (host-only key; `last_fail_reason`
+  taxonomy; mirrors domain auto-skip). **Never** auto-DELETE gateway `proxyPools`
 - Empty local proxy file after sync → `brutal_farmer` **skips farm** that round
   (inject remains fail-closed on empty live proxyPools)
 
@@ -351,7 +355,7 @@ sqlite3 ~/grok-farm/akun.db \
 sqlite3 ~/grok-farm/akun.db \
   "SELECT token_health, COUNT(*) FROM accounts GROUP BY token_health;"
 sqlite3 ~/grok-farm/akun.db \
-  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score \
+  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score, last_fail_reason \
    FROM proxy_stats ORDER BY score DESC LIMIT 10;"
 ```
 
@@ -459,16 +463,19 @@ See [CAPACITY.md](./CAPACITY.md).
 
 ## 10. Alerts
 
-If `GROK_ALERT_WEBHOOK` (or `GROK_FARM_ALERT_WEBHOOK`) is set, `workflow.py` / `alerts.py` POST redacted Discord-style messages on empty proxy pool, all-fail inject, partial inject, or errors.
+`alerts.py` fires when **Telegram** (`GROK_TELEGRAM_BOT_TOKEN` +
+`GROK_TELEGRAM_CHAT_ID`) and/or Discord-style webhook (`GROK_ALERT_WEBHOOK` /
+`GROK_FARM_ALERT_WEBHOOK`) is set. Used by `workflow.py` (empty proxy pool,
+all-fail / partial inject, errors) and health timer (hard only).
 
-- **Leave unset** if no Discord/Telegram webhook — do not invent a URL.
-- Bodies are redacted (no full JWT / proxy credentials).
+- **Leave unset** if unused — do not invent a URL or token.
+- Bodies are redacted (no full JWT / proxy credentials / bot token).
 - **Debounce:** same title+issues fingerprint suppressed for
   `GROK_ALERT_DEBOUNCE_MIN` minutes (default **60**; `0` = off) via
   `logs/alert_debounce/<hash>.ts`.
 - **Health timer:** `grok-farm-health.timer` → `scripts/health_check.sh` →
   `check_status.py --json` every 15 minutes (inventory only; **no** `--probe` /
-  `--mark-error`). Webhook on exit **3** (hard) or unexpected failure only; exit
+  `--mark-error`). Alert on exit **3** (hard) or unexpected failure only; exit
   **2** (soft) is log-only. Unit `SuccessExitStatus=2 3`. Log:
   `logs/health_check.log`.
 
