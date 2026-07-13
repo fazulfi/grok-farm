@@ -45,7 +45,21 @@ sqlite3 /var/lib/9router/db/data.sqlite \
    SELECT COUNT(*) FROM providerConnections WHERE provider='xai';"
 ```
 
-`check_status.py` reports: farmer unit, account counts, token health, proxy file lines, top `proxy_stats`, disk, last backup log age, issues list. Exit `2` if unhealthy.
+`check_status.py` reports: farmer unit, account counts, token health, proxy file lines, top `proxy_stats`, domain pool / `domain_stats`, disk, last backup log age, issues list. Exit `2` if unhealthy.
+
+```bash
+python3 check_status.py
+python3 check_status.py --json
+# Mark dead farmed JWTs as status=error (same as mark_expired_tokens.py)
+python3 check_status.py --mark-expired
+# Optional: also mark injected expired as error (inventory hygiene; no gateway revoke)
+python3 check_status.py --mark-expired-injected
+
+python3 mark_expired_tokens.py --dry-run
+python3 mark_expired_tokens.py
+```
+
+See RUNBOOK **R10** for expired JWT policy.
 
 ### 2.2 Expected steady state
 
@@ -136,6 +150,43 @@ grep -q '^GROK_EMAIL_DOMAIN_STRATEGY=' .env \
 # Next batch of systemd farmer reloads .env via farm.py — no restart required for env-only
 # If you changed code modules: next process start picks them up; restart only if needed:
 # sudo systemctl restart grok-farmer
+```
+
+#### Realistic email names (not hash)
+
+```bash
+# Default offline human local-parts (recommended)
+grep -q '^GROK_EMAIL_LOCAL_STYLE=' .env \
+  && sed -i 's|^GROK_EMAIL_LOCAL_STYLE=.*|GROK_EMAIL_LOCAL_STYLE=realistic|' .env \
+  || echo 'GROK_EMAIL_LOCAL_STYLE=realistic' >> .env
+
+# Optional: parser.name API (register free key at https://parser.name/register)
+# Free tier ~100 requests/day — use as spice only; farm falls back to offline realistic
+# echo 'GROK_PARSER_NAME_API_KEY=your_key' >> .env
+# echo 'GROK_PARSER_NAME_COUNTRY=US' >> .env
+# GROK_EMAIL_LOCAL_STYLE=parser
+
+# Smoke samples
+python3 -c "from name_gen import generate_local_part; print([generate_local_part('realistic')[0] for _ in range(8)])"
+```
+
+Examples: `brandon.howard@domain`, `rizky.saputra@domain`, `k.little92@domain`.
+
+**Corpora (drop more files anytime):**
+
+| File | Source |
+|------|--------|
+| `data/names_id.txt` | Indonesian names — [gist maulvi/nama.txt](https://gist.github.com/maulvi/e443e22b82a1dc24e14344b47f0a80ea) cleaned |
+| `data/names_en_first.txt` / `names_en_last.txt` | English |
+| `data/names_intl_first.txt` | International given names |
+| `data/names_extra_first.txt` / `names_extra_last.txt` | Operator-supplied (one name/line) |
+
+```bash
+# Prefer Indonesian-heavy names
+grep -q '^GROK_NAME_REGION=' .env \
+  && sed -i 's|^GROK_NAME_REGION=.*|GROK_NAME_REGION=id|' .env \
+  || echo 'GROK_NAME_REGION=id' >> .env
+python3 -c "from name_gen import corpus_stats, generate_local_part; print(corpus_stats()); print([generate_local_part()[0] for _ in range(8)])"
 ```
 
 #### Domain pick + workflow safety

@@ -50,11 +50,20 @@ Farm VPS only needs the **public** recipient to encrypt. The **private** identit
 | Option | How | When |
 |--------|-----|------|
 | **A. Password manager** (recommended) | Store full `age.identity` file contents as a secure note (Bitwarden/1Password/etc.) | No USB; works from any trusted machine |
-| **B. Second host** | Copy identity to operator laptop or another VPS **not** the farm host: `chmod 600 ~/.config/grok-farm/age.identity` | Daily restore capability |
+| **B. Second host / operator laptop** (recommended with A) | Copy identity off the farm host: `chmod 600 ~/.config/grok-farm/age.identity` | Daily restore capability |
 | **C. Encrypted local file** | `age -p -o age.identity.age age.identity` (passphrase) on operator disk | Offline-ish without USB |
 | **D. Temporary VPS root-only** | Identity at `/root/.config/grok-farm/age.identity` (`chmod 600`, root-only) | **Interim only** until A/B/C done |
 
-**CSA production note:** identity currently lives root-only on the farm host for operational convenience. That is **acceptable interim** if and only if a second copy exists outside the farm (A/B/C). Without a second copy, S3 restore is impossible if the VPS is lost.
+**Operator laptop path (Windows / no USB):**
+
+| Item | Path / control |
+|------|----------------|
+| Private identity | `%USERPROFILE%\.config\grok-farm\age.identity` (e.g. `C:\Users\<you>\.config\grok-farm\age.identity`) |
+| Public key (safe) | same dir `age.pubkey` (`age1…`) |
+| ACL | remove inheritance; grant FullControl only to your user + `SYSTEM` (`icacls … /inheritance:r /grant:r "%USERNAME%:(F)" "SYSTEM:(F)"`) |
+| Decrypt | install [age](https://github.com/FiloSottile/age) for Windows, or decrypt on a Linux host that has the identity |
+
+**CSA production:** farm host may keep root-only identity at `/root/.config/grok-farm/age.identity` for ops convenience **only if** a second copy exists on the operator laptop (B) and/or password manager (A). Without a second copy, S3 restore is impossible if the VPS is lost.
 
 Do **not** commit `age.identity` or paste it into chat/tickets.
 
@@ -156,12 +165,15 @@ magadirxwin ALL=(root) NOPASSWD: /bin/systemctl start grok-farmer, /bin/systemct
 
 ---
 
-## 8. Token health
+## 8. Token health & expired JWT policy
 
 - `token_util.py` decodes JWT `exp` without signature verify
 - Columns: `accounts.token_exp`, `accounts.token_health`
 - Values: `ok` \| `expiring_soon` \| `expired` \| `invalid` \| `missing`
-- Workflow skips inject for `expired` → `status=error`, `notes=token_expired`
+- **Import fail-closed:** `import_db.py` / `workflow.import_batches` insert dead JWT as `status=error` (`notes=token_expired|bad_token`), never as injectable `farmed`
+- **Inject path:** workflow skips inject for expired/invalid → `status=error`
+- **Batch cleanup:** `python3 mark_expired_tokens.py` (farmed-only default) or `python3 check_status.py --mark-expired`
+- **Injected inventory:** default leaves `status=injected` and refreshes meta only (soft health `many_expired_tokens`). Use `--include-injected` / `--mark-expired-injected` to set `status=error` for inventory cleanup — **does not** revoke 9router `providerConnections` (operator re-farm / re-auth separately; see RUNBOOK R10)
 
 ---
 

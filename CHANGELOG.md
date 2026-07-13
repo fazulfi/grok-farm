@@ -5,9 +5,30 @@ All notable changes to Grok Farm are documented here.
 ## [Unreleased]
 
 ### Planned
-- Expired JWT re-farm / re-auth policy automation
 - Multi-Gmail Pattern B production rollout (`identities.json`)
 - S3 retention policy automation beyond one-shot plaintext cleanup
+- Re-farm / re-auth automation for `status=error` + `notes=token_expired` (gateway-side revoke optional)
+
+## [2.1.1] — 2026-07-13
+
+### Added
+- **Realistic email local-parts** (`name_gen.py`): human-style `first.last` / `j.smith92` instead of crypto hash
+- `GROK_EMAIL_LOCAL_STYLE=realistic|crypto|parser` (default `realistic`)
+- Optional [parser.name](https://parser.name) API (`GROK_PARSER_NAME_API_KEY`) with offline fallback (free tier ~100/day) — optional spice only; not required for farming
+- Offline name corpora under `data/`: Indonesian (`names_id.txt` from [maulvi gist](https://gist.github.com/maulvi/e443e22b82a1dc24e14344b47f0a80ea)), EN first/last, intl; `GROK_NAME_REGION=mixed|id|en|intl`
+- Expanded corpora `data/names_extra_first.txt` / `names_extra_last.txt` (~20k first / ~40k last); optional `GROK_NAME_FIRST_FILES` / `GROK_NAME_LAST_FILES`
+- **Expired JWT policy**: `token_util.mark_expired_accounts`, CLI `mark_expired_tokens.py` (`--dry-run`, `--include-injected`, `--json`)
+- `check_status.py --mark-expired` / `--mark-expired-injected` health hooks
+- SECURITY: operator laptop vault path for `age.identity` (Windows ACL note; no USB required)
+- RUNBOOK **R10** — expired JWT inventory cleanup
+
+### Changed
+- `import_db.py` / `workflow.import_batches` **fail-closed**: dead/invalid JWT insert as `status=error` (`notes=token_expired|bad_token`), not `farmed`
+- Default farm local-part style is realistic offline (no external API dependency)
+
+### Security
+- age private identity second copy expected on operator laptop (`~/.config/grok-farm/age.identity`, mode 600 / Windows ACL restricted)
+- Expired tokens no longer re-queue forever through inject; historical injected JWT expiry remains soft health noise unless `--include-injected`
 
 ## [2.1.0] — 2026-07-13
 

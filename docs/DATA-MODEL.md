@@ -74,8 +74,29 @@ Tracks farm/OTP outcomes per catch-all domain so multi-domain pools can auto-ski
 
 ```
 (missing) --import--> farmed --workflow success--> injected
-                 \-- token expired / inject fail --> error
+                 \-- dead JWT on import / inject fail / mark_expired --> error
 ```
+
+### Import fail-closed (JWT)
+
+On `import_db.py` / `workflow.import_batches`:
+
+| Access token health | Insert `status` | `notes` |
+|---------------------|-----------------|---------|
+| `ok` / `expiring_soon` | `farmed` | null |
+| `expired` | `error` | `token_expired` |
+| `invalid` / missing / non-JWT | `error` | `bad_token` |
+
+Existing rows: if already `farmed` and re-import sees dead JWT, row is upgraded to `error` (does not reopen `injected`).
+
+### Mark expired batch
+
+`token_util.mark_expired_accounts` / `mark_expired_tokens.py`:
+
+- Scans `status IN ('farmed','injected')`
+- Always refreshes `token_exp` + `token_health` (unless `--dry-run`)
+- Marks **farmed** dead → `error`
+- Marks **injected** dead → `error` only with `include_injected=True` / `--include-injected`
 
 ---
 

@@ -192,6 +192,52 @@ Hard refresh browser dashboard.
 
 ---
 
+## R10 — Expired / invalid JWT inventory
+
+**Symptoms:** `check_status.py` shows many `token_health=expired`; soft issue `many_expired_tokens`; inject backlog never drains because farmed rows are dead tokens; workflow marks `notes=token_expired`.
+
+### Policy (enterprise)
+
+| Row status | Dead JWT action |
+|------------|-----------------|
+| `farmed` | Always mark `status=error`, `notes=token_expired` or `bad_token` (import fail-closed + mark CLI) |
+| `injected` | Refresh `token_exp` / `token_health` only by default; optional `--include-injected` sets `status=error` for inventory hygiene |
+| Gateway | **No auto-delete** of 9router `providerConnections` — re-farm or re-auth is a separate operator decision |
+
+### Commands
+
+```bash
+cd ~/grok-farm
+source .venv/bin/activate
+
+# Preview
+python3 mark_expired_tokens.py --dry-run
+python3 mark_expired_tokens.py --dry-run --json
+
+# Apply farmed-only (safe default)
+python3 mark_expired_tokens.py
+# or: python3 check_status.py --mark-expired
+
+# Optional: also mark injected expired as error (inventory only)
+python3 mark_expired_tokens.py --include-injected
+# or: python3 check_status.py --mark-expired-injected
+```
+
+### After cleanup
+
+1. `python3 check_status.py` — `farmed` should not hold expired tokens; hard issue `farmed_expired_tokens` cleared
+2. Soft `many_expired_tokens` may remain if injected JWTs aged out and you did **not** use `--include-injected`
+3. To restore capacity: farm fresh accounts (realistic local-parts) → import → workflow inject
+4. Optionally prune dead gateway connections on 9router (manual SQL / UI) — out of band from this CLI
+
+### Do not
+
+- Re-inject known-expired farmed rows hoping they revive
+- Commit tokens or dump JWT payloads into tickets
+- Treat soft expired inventory as SEV1 unless gateway yield is actually broken
+
+---
+
 ## Severity matrix
 
 | Sev | Example | Response time |
