@@ -14,7 +14,10 @@
 | 9router | Gateway VPS | `next-server` / custom | LLM gateway + proxyPools |
 | SSH tunnel path | Farm → Gateway | OpenSSH key | Proxy sync + inject |
 | `grok-farm-backup.timer` | Farm VPS | systemd timer | Hourly age-encrypted backup: **S3** `s3://grok-farm/farm-vps/csa/grok/` when `~/.config/grok-farm/backup.env` present; else local `~/grok-farm/backups/` |
-| `grok-farm-health.timer` | Farm VPS | systemd timer | Every **15 min** (`*:0/15` + RandomizedDelay ≤2m): inventory `check_status.py --json` via `scripts/health_check.sh`; webhook on exit 2 if `GROK_ALERT_WEBHOOK` set |
+| `grok-farm-health.timer` | Farm VPS | systemd timer | Every **15 min** (`*:0/15` + RandomizedDelay ≤2m): inventory `check_status.py --json` via `scripts/health_check.sh`; webhook on **hard** exit **3** only (soft exit 2 = log-only) |
+| `grok-farm-probe.timer` | Farm VPS | systemd timer | Every **6h**: soft `probe_tokens.py` (`scripts/probe_soft.sh`, no `--mark-error`) |
+| `grok-farm-reconcile.timer` | Farm VPS | systemd timer | Every **12h**: `reconcile_9router.py --json` report only |
+| `grok-farm-mark-expired.timer` | Farm VPS | systemd timer | Every **30 min**: mark **farmed-only** expired JWTs as `error` (no `--include-injected`) |
 
 ### Auto import / inject (brutal v5)
 
@@ -66,7 +69,19 @@ sqlite3 /var/lib/9router/db/data.sqlite \
    SELECT COUNT(*) FROM providerConnections WHERE provider='xai';"
 ```
 
-`check_status.py` reports: farmer unit, account counts, token health, **live probe** (`needs_relogin` + last_probe_status), proxy file lines, top `proxy_stats`, domain pool / `domain_stats`, disk, last backup log age, issues list. Exit `2` if unhealthy (includes soft `needs_relogin` / `many_expired_tokens`).
+`check_status.py` reports: farmer unit, account counts, token health, **live probe**
+(`needs_relogin` + last_probe_status), proxy file lines, top `proxy_stats` (incl.
+soft-skip), domain pool / `domain_stats`, disk, last backup log age.
+
+**Exit codes (hard/soft split):**
+
+| Exit | Meaning | Health timer webhook |
+|------|---------|----------------------|
+| **0** | Healthy (no issues) | none |
+| **2** | Soft-only (`needs_relogin`, `many_expired_tokens`, `proxy_pool_low`, `proxy_many_soft_skipped`, …) | **log-only** (no webhook) |
+| **3** | Hard (`farmer_not_active`, `proxy_file_empty`, `disk_high`, backlog, backup_*, identity_*, …) | **webhook** if set |
+
+JSON includes `issues_hard`, `issues_soft`, `exit_code`, `proxy_soft_skip`.
 
 ```bash
 python3 check_status.py
@@ -77,6 +92,7 @@ python3 check_status.py --json
 # Large soft probe batch (default soft; no --mark-error)
 python3 probe_tokens.py --limit 200
 python3 probe_tokens.py --limit 200 --json
+# Timer path: bash scripts/probe_soft.sh  (GROK_PROBE_TIMER_LIMIT default 100)
 
 # Smaller sample / dry-run
 python3 check_status.py --probe --probe-limit 20
@@ -87,6 +103,7 @@ python3 probe_tokens.py --dry-run --limit 5
 python3 check_status.py --mark-expired
 # Optional: also mark injected expired as error (inventory hygiene; no gateway revoke)
 python3 check_status.py --mark-expired-injected
+# Timer path (farmed-only): bash scripts/mark_expired_farmed.sh
 
 python3 mark_expired_tokens.py --dry-run
 python3 mark_expired_tokens.py
@@ -95,6 +112,7 @@ python3 mark_expired_tokens.py
 python3 reconcile_9router.py
 python3 reconcile_9router.py --json
 python3 reconcile_9router.py --json --limit-print 5
+# Timer path: bash scripts/reconcile_soft.sh
 
 # Adaptive concurrent decision for next farm batch
 python3 adaptive_concurrent.py --print
@@ -103,12 +121,13 @@ python3 adaptive_concurrent.py --json
 
 **Soft inventory (probe) dashboard:** `check_status.py` prints
 `probe: needs_relogin=N last_status={...}` and may list soft issue `needs_relogin`
-(exit 2). Use `probe_tokens.py --limit 200 --json` for batch counts by `alive` /
+(exit **2**). Use `probe_tokens.py --limit 200 --json` for batch counts by `alive` /
 `needs_relogin` / `jwt_expired` / network. Soft policy = write `last_probe_*` +
 `needs_relogin` only; never `status=error` unless explicit `--mark-error`.
 
 See RUNBOOK **R10** (expired JWT), **R13** (probe, large batch), **R14**
-(reconcile), **R15** (adaptive concurrent).
+(reconcile), **R15** (adaptive concurrent), **R17** (health hard/soft), **R18**
+(proxy soft-evict).
 
 ### 2.2 Expected steady state
 
@@ -307,8 +326,12 @@ sudo systemctl restart grok-farmer
 
 - Add/remove pools on 9router
 - Next farmer loop runs `sync_proxies_from_9r.py`
-- Inject uses live pool list (random per account)
-- Inject success/fail recorded in `proxy_stats` (host-only key)
+- Inject uses live pool list with **score-weighted pick** + soft-skip of high
+  `consecutive_fails` / `disabled` proxies (`proxies_to_skip()`; **fail-open** if
+  all would be skipped). Never auto-DELETE gateway `proxyPools`.
+- Inject success/fail recorded in `proxy_stats` (host-only key; mirrors domain auto-skip)
+- Empty local proxy file after sync → `brutal_farmer` **skips farm** that round
+  (inject remains fail-closed on empty live proxyPools)
 
 Do **not** hand-edit `usa_proxies.txt` for production; it is overwritten by sync.
 
@@ -328,7 +351,8 @@ sqlite3 ~/grok-farm/akun.db \
 sqlite3 ~/grok-farm/akun.db \
   "SELECT token_health, COUNT(*) FROM accounts GROUP BY token_health;"
 sqlite3 ~/grok-farm/akun.db \
-  "SELECT proxy_key, success_count, fail_count, score FROM proxy_stats ORDER BY score DESC LIMIT 10;"
+  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score \
+   FROM proxy_stats ORDER BY score DESC LIMIT 10;"
 ```
 
 Statuses (inject-queue marks only):
@@ -439,7 +463,22 @@ If `GROK_ALERT_WEBHOOK` (or `GROK_FARM_ALERT_WEBHOOK`) is set, `workflow.py` / `
 
 - **Leave unset** if no Discord/Telegram webhook — do not invent a URL.
 - Bodies are redacted (no full JWT / proxy credentials).
-- **Health timer:** `grok-farm-health.timer` → `scripts/health_check.sh` → `check_status.py --json` every 15 minutes (inventory only; **no** `--probe` / `--mark-error`). On exit **2** (unhealthy) or unexpected failure, posts via `alerts.send_alert` when webhook is set. Log: `logs/health_check.log`.
+- **Debounce:** same title+issues fingerprint suppressed for
+  `GROK_ALERT_DEBOUNCE_MIN` minutes (default **60**; `0` = off) via
+  `logs/alert_debounce/<hash>.ts`.
+- **Health timer:** `grok-farm-health.timer` → `scripts/health_check.sh` →
+  `check_status.py --json` every 15 minutes (inventory only; **no** `--probe` /
+  `--mark-error`). Webhook on exit **3** (hard) or unexpected failure only; exit
+  **2** (soft) is log-only. Unit `SuccessExitStatus=2 3`. Log:
+  `logs/health_check.log`.
+
+### Soft observability timers (no session recovery)
+
+| Timer | Script | Notes |
+|-------|--------|-------|
+| `grok-farm-probe.timer` | `scripts/probe_soft.sh` | Soft probe; never `--mark-error` |
+| `grok-farm-reconcile.timer` | `scripts/reconcile_soft.sh` | Diff report only |
+| `grok-farm-mark-expired.timer` | `scripts/mark_expired_farmed.sh` | farmed JWT → `error` only |
 
 ---
 

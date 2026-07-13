@@ -495,9 +495,11 @@ Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
 
 ---
 
-## R17 — Health timer / exit 2 webhook
+## R17 — Health timer / hard vs soft exit codes
 
-**Symptoms:** Discord/Telegram alert “health check unhealthy”; `logs/health_check.log` shows `exit_code=2`; timer failed / inactive.
+**Symptoms:** Discord/Telegram alert “health check hard issues”; `logs/health_check.log`
+shows `exit_code=3`; soft noise (`exit_code=2`) floods logs but should **not** webhook;
+timer failed / inactive.
 
 ### What the timer does
 
@@ -507,27 +509,36 @@ Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
 | Schedule | every 15 min (`*:0/15`, RandomizedDelaySec ≤2m) |
 | Script | `scripts/health_check.sh` |
 | Check | `check_status.py --json` only — **no** `--probe`, **no** `--mark-error` |
-| Alert | `alerts.send_alert` if exit ≠ 0 and webhook set |
+| Exit 0 | healthy |
+| Exit 2 | soft-only → **log only** (no webhook) |
+| Exit 3 | hard issues → **webhook** if set (debounced) |
+| SuccessExitStatus | `2 3` (oneshot unit stays green) |
 | Ban risk | **zero** (inventory / local files / systemctl only) |
+
+### Hard vs soft issue map
+
+| Issue code | Severity | Follow |
+|------------|----------|--------|
+| `farmer_not_active` | **hard** | R1 / `systemctl status grok-farmer` |
+| `backup_stale` / `backup_no_log` | **hard** | backup log + R12 / SECURITY |
+| `disk_high` | **hard** | free disk; CAPACITY |
+| `farmed_expired_tokens` | **hard** | **R10** (farmed dead JWT) |
+| `large_farmed_backlog` | **hard** | run `workflow.py` / check 9router SSH |
+| `proxy_file_empty` | **hard** | sync proxyPools; refill gateway |
+| `identity_config_error` / `no_email_domains` | **hard** | `.env` / `identities.json` |
+| `many_expired_tokens` | **soft** | **R10** inventory noise |
+| `needs_relogin` | **soft** | **R13** (do not auto reauth) |
+| `proxy_pool_low` | **soft** | refill pools; **R18** |
+| `proxy_many_soft_skipped` | **soft** | **R18** |
 
 ### Triage
 
 | Step | Action |
 |------|--------|
 | 1 | `systemctl status grok-farm-health.timer --no-pager` — should be active |
-| 2 | `tail -80 ~/grok-farm/logs/health_check.log` |
-| 3 | `cd ~/grok-farm && python3 check_status.py` — read `ISSUES:` line |
-| 4 | Map issue → existing runbook (below) |
-
-| Issue code | Follow |
-|------------|--------|
-| `farmer_not_active` | R1 / `systemctl status grok-farmer` |
-| `backup_stale` / `backup_no_log` | backup log + R12 / SECURITY |
-| `disk_high` | free disk; CAPACITY |
-| `farmed_expired_tokens` / `many_expired_tokens` | **R10** |
-| `needs_relogin` | soft inventory — **R13** (do not auto reauth) |
-| `large_farmed_backlog` | run `workflow.py` / check 9router SSH |
-| `identity_config_error` / `no_email_domains` | `.env` / `identities.json` |
+| 2 | `tail -80 ~/grok-farm/logs/health_check.log` — note exit_code + alert_sent |
+| 3 | `cd ~/grok-farm && python3 check_status.py` — hard vs soft lists |
+| 4 | Map issue → table above / existing runbook |
 
 ### Manual oneshot
 
@@ -535,6 +546,7 @@ Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
 sudo systemctl start grok-farm-health.service
 # or as farmer:
 cd ~/grok-farm && bash scripts/health_check.sh; echo exit=$?
+# 0=ok  2=soft-only  3=hard
 ```
 
 ### Enable after deploy
@@ -544,4 +556,67 @@ cd ~/grok-farm && bash scripts/health_check.sh; echo exit=$?
 sudo systemctl enable --now grok-farm-health.timer
 ```
 
-**Do not** stop `grok-farmer` to “fix” health noise.
+**Do not** stop `grok-farmer` to “fix” health noise. Soft exit 2 is expected under
+high `needs_relogin` / JWT expired inventory — not a farm outage.
+
+---
+
+## R18 — Proxy soft-evict (score-weighted pick; no gateway DELETE)
+
+**Symptoms:** inject fail rate high; `proxy_stats` many low scores / high
+`consecutive_fails`; soft issue `proxy_many_soft_skipped` or `proxy_pool_low`;
+farm skipped after empty local proxy file.
+
+### Behavior (product)
+
+| Item | Rule |
+|------|------|
+| Soft skip | `disabled=1` **or** `consecutive_fails >= GROK_PROXY_MAX_CONSECUTIVE_FAILS` (default **5**) |
+| Pick | `workflow.pick_proxy()` score-weighted among non-skipped |
+| Fail-open | if **all** proxies would be skipped → use full live list (never hard-stop inject on soft skip alone) |
+| Empty live pool | still **fail-closed** (abort inject) — same as before |
+| Empty local file | `brutal_farmer` skips **farm** that round after sync |
+| Gateway DELETE | **never automatic** — manual/CLI only (`proxy_cleaner` ops) |
+
+### Triage
+
+```bash
+cd ~/grok-farm
+python3 check_status.py --json | jq '.proxy_soft_skip, .issues_soft, .issues_hard'
+sqlite3 akun.db \
+  "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score
+   FROM proxy_stats ORDER BY consecutive_fails DESC, score ASC LIMIT 15;"
+# Refill gateway proxyPools (non-EU), then:
+python3 sync_proxies_from_9r.py
+```
+
+**Do not** mass-DELETE `proxyPools` from the farm product path. Clear soft-skip by
+successful injects (resets consecutive_fails) or SQL `disabled=0` after fixing the
+node.
+
+---
+
+## R19 — Soft probe / reconcile / mark-expired timers
+
+**Symptoms:** timers inactive; probe log silent; farmed expired backlog grows;
+reconcile never runs.
+
+| Unit | Schedule | Script | Policy |
+|------|----------|--------|--------|
+| `grok-farm-probe.timer` | ~6h | `scripts/probe_soft.sh` | soft only; **no** `--mark-error` |
+| `grok-farm-reconcile.timer` | ~12h | `scripts/reconcile_soft.sh` | report only |
+| `grok-farm-mark-expired.timer` | 30m | `scripts/mark_expired_farmed.sh` | **farmed-only** JWT → error |
+
+```bash
+systemctl list-timers 'grok-farm-*' --no-pager
+sudo systemctl start grok-farm-probe.service
+sudo systemctl start grok-farm-reconcile.service
+sudo systemctl start grok-farm-mark-expired.service
+# enable after deploy:
+sudo systemctl enable --now grok-farm-probe.timer
+sudo systemctl enable --now grok-farm-reconcile.timer
+sudo systemctl enable --now grok-farm-mark-expired.timer
+```
+
+Ban risk: probe is soft inventory only (same as R13). Mark-expired does not touch
+injected rows and does not revoke gateway connections.
