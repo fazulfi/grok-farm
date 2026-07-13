@@ -1,0 +1,11 @@
+[Unit]
+Description=Grok Farm soft probe every 6 hours
+Requires=grok-farm-probe.service
+
+[Timer]
+OnCalendar=*-*-* 00/6:15:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target
