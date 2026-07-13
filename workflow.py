@@ -16,17 +16,20 @@ from token_util import token_health, update_account_token_meta
 
 CSA_DB = os.path.expanduser(os.environ.get("GROK_AKUN_DB") or DEFAULT_DB)
 RESULTS = os.path.expanduser(os.environ.get("GROK_RESULTS_DIR") or "~/grok-farm/results")
+# Accept both GROK_9R_KEY / GROK_9R_PORT (live .env) and GROK_9R_SSH_KEY / GROK_9R_SSH_PORT
+_SSH_KEY = os.environ.get("GROK_9R_SSH_KEY") or os.environ.get("GROK_9R_KEY") or "~/.ssh/id_ed25519"
+_SSH_PORT = os.environ.get("GROK_9R_SSH_PORT") or os.environ.get("GROK_9R_PORT") or "39999"
 SSH = [
     "ssh",
     "-i",
-    os.path.expanduser(os.environ.get("GROK_9R_SSH_KEY") or "~/.ssh/id_ed25519"),
+    os.path.expanduser(_SSH_KEY),
     "-o",
     "StrictHostKeyChecking=no",
     "-o",
     "ConnectTimeout=15",
     os.environ.get("GROK_9R_SSH") or "root@49.12.82.34",
     "-p",
-    os.environ.get("GROK_9R_SSH_PORT") or "39999",
+    _SSH_PORT,
 ]
 
 
