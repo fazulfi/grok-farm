@@ -108,6 +108,15 @@ _LEGACY_JSON = _env("GROK_RESULTS_JSON")
 _LEGACY_TXT = _env("GROK_RESULTS_TXT")
 _LEGACY_FAILED = _env("GROK_FAILED_JSON")
 EMAIL_LOCAL_LEN = max(10, min(32, int(_env("GROK_EMAIL_LOCAL_LEN", "16") or "16")))
+# Email local-part style: crypto | realistic | parser (parser.name API + offline fallback)
+from name_gen import (  # noqa: E402
+    generate_local_part as _gen_local_part,
+    random_display_name as _random_display_name,
+    resolve_style as _resolve_email_local_style,
+    parser_status as _parser_name_status,
+)
+
+EMAIL_LOCAL_STYLE = _resolve_email_local_style(_env("GROK_EMAIL_LOCAL_STYLE", "realistic"))
 
 # Set in init_batch() at run start
 BATCH_ID = ""
@@ -138,18 +147,12 @@ XAI_SCOPE = (
 )
 GROK_FREE_TOKEN_LIMIT = 1_000_000
 
-FIRST_NAMES = [
-    "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Quinn", "Avery",
-    "Parker", "Sage", "River", "Skyler", "Dakota", "Reese", "Finley", "Rowan",
-    "Charlie", "Emerson", "Hayden", "Jamie", "Blake", "Drew", "Eden", "Kai",
-    "Noah", "Liam", "Emma", "Olivia", "Mia", "Lucas", "Mason", "Sophia",
-]
-LAST_NAMES = [
-    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
-    "Davis", "Rodriguez", "Martinez", "Anderson", "Taylor", "Thomas", "Moore",
-    "Jackson", "Martin", "Lee", "Thompson", "White", "Harris", "Clark", "Lewis",
-    "Walker", "Hall", "Allen", "Young", "King", "Wright", "Scott", "Green",
-]
+# Display names come from name_gen (shared with realistic email local-parts)
+try:
+    from name_gen import FIRST_NAMES, LAST_NAMES  # type: ignore
+except Exception:
+    FIRST_NAMES = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley"]
+    LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia"]
 
 # ── Proxy pool ───────────────────────────────────────────────────────────────
 # Sources (merged, de-duped by URL):
@@ -611,7 +614,9 @@ _ALPHANUM = string.ascii_lowercase + string.digits
 
 def _crypto_local_part(length: int) -> str:
     """Cryptographically strong local-part: secrets, not random.choices."""
-    return "".join(secrets.choice(_ALPHANUM) for _ in range(length))
+    from name_gen import crypto_local_part
+
+    return crypto_local_part(length)
 
 
 def _emails_from_accounts_json(path: Path) -> set[str]:
@@ -715,6 +720,7 @@ def init_batch(max_accounts: int, concurrent: int) -> str:
         "max_accounts": max_accounts,
         "concurrent": concurrent,
         "email_local_len": EMAIL_LOCAL_LEN,
+        "email_local_style": EMAIL_LOCAL_STYLE,
     }
     (BATCH_DIR / "batch_meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(f"[BATCH] id={BATCH_ID}", flush=True)
@@ -753,11 +759,15 @@ def _record_domain_outcome(email_addr: str, success: bool) -> None:
 
 
 async def generate_email() -> str:
-    """Crypto-random unique email; multi-domain pool when GROK_EMAIL_DOMAINS set.
+    """Unique email; multi-domain pool when GROK_EMAIL_DOMAINS set.
 
-    Reserved in global set + used_emails.txt. Domain pick: random or round_robin
-    (GROK_EMAIL_DOMAIN_STRATEGY). Unhealthy domains (domain_stats consecutive OTP
-    fails) are skipped. IMAP for OTP resolved per domain via identity pool.
+    Local-part style (GROK_EMAIL_LOCAL_STYLE):
+      realistic — human first.last / firstlast patterns (default)
+      crypto    — alnum secrets (legacy hash-like)
+      parser    — parser.name API if GROK_PARSER_NAME_API_KEY set, else realistic
+
+    Reserved in global set + used_emails.txt. Domain pick: random or round_robin.
+    Unhealthy domains (domain_stats) skipped. IMAP via identity pool.
     """
     skip = _domain_skip_set()
     async with _emails_lock:
@@ -773,8 +783,9 @@ async def generate_email() -> str:
                     domain = EMAIL_DOMAIN.lstrip("@")
                 if not domain:
                     raise RuntimeError("No domain available in identity pool")
-                # secrets-based alnum (not random.choices) + global used set
-                name = _crypto_local_part(EMAIL_LOCAL_LEN)
+                name, _person = _gen_local_part(
+                    style=EMAIL_LOCAL_STYLE, crypto_len=EMAIL_LOCAL_LEN
+                )
                 addr = f"{name}@{domain.lstrip('@')}"
             else:
                 base = GMAIL_BASE or IMAP_USER
@@ -782,8 +793,12 @@ async def generate_email() -> str:
                     raise RuntimeError("GROK_GMAIL_BASE / GROK_IMAP_USER required for plus_trick")
                 user, _, domain = base.partition("@")
                 user = user.split("+", 1)[0]
-                tag_len = max(10, min(20, EMAIL_LOCAL_LEN))
-                tag = _crypto_local_part(tag_len)
+                # plus_trick: base+human_tag@gmail keeps uniqueness
+                tag, _person = _gen_local_part(
+                    style=EMAIL_LOCAL_STYLE, crypto_len=max(10, min(20, EMAIL_LOCAL_LEN))
+                )
+                # Gmail plus tags: dots/underscores ok; strip unsafe
+                tag = re.sub(r"[^a-z0-9._+-]+", "", tag.lower()) or _crypto_local_part(12)
                 addr = f"{user}+{tag}@{domain}"
             key = addr.lower()
             if key not in _used_emails:
@@ -794,7 +809,8 @@ async def generate_email() -> str:
 
 
 def random_name() -> tuple[str, str]:
-    return random.choice(FIRST_NAMES), random.choice(LAST_NAMES)
+    """Profile first/last — same corpus as realistic email local-parts."""
+    return _random_display_name()
 
 
 # ── IMAP OTP ─────────────────────────────────────────────────────────────────
@@ -3088,7 +3104,16 @@ async def main():
         else f"  Proxies    : direct ({PROXY_SOURCE})",
         flush=True,
     )
-    print(f"  Email len  : {EMAIL_LOCAL_LEN} (crypto secrets)", flush=True)
+    print(f"  Email style: {EMAIL_LOCAL_STYLE}", flush=True)
+    if EMAIL_LOCAL_STYLE == "crypto":
+        print(f"  Email len  : {EMAIL_LOCAL_LEN} (crypto secrets)", flush=True)
+    elif EMAIL_LOCAL_STYLE == "parser":
+        ps = _parser_name_status()
+        print(
+            f"  parser.name: key={'set' if ps.get('api_key_set') else 'MISSING→offline'} "
+            f"country={ps.get('country')}",
+            flush=True,
+        )
     print(f"  Known mail : {known} (all batches + used_emails.txt)", flush=True)
     print(f"  Results    : {RESULTS_ROOT}/batch_<id>/  (per run)", flush=True)
     print("-" * 60, flush=True)

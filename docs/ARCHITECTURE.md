@@ -66,8 +66,15 @@ GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com
 | `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred) |
 | `GROK_EMAIL_DOMAIN` | Legacy single domain (merged into pool) |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `random` (default) or `round_robin` |
+| `GROK_EMAIL_LOCAL_STYLE` | `realistic` (default human names) · `crypto` (hash) · `parser` (API) |
+| `GROK_PARSER_NAME_API_KEY` | Optional [parser.name](https://parser.name) generate endpoint |
 | `GROK_IMAP_*` | Default inbox shared by all domains |
 | `GROK_IDENTITY_FILE` / `identities.json` | Optional multi-IMAP: domain → Gmail map |
+
+**Local-part generation** (`name_gen.py`):
+- **realistic** (default): offline first/last corpus → `john.smith`, `j.miller82`, `mary_jones` …
+- **crypto**: legacy alnum secrets
+- **parser**: `https://api.parser.name/?endpoint=generate` when key set; falls back to realistic on rate-limit/error (free ~100 req/day — not enough alone for unlimited farm)
 
 **Pattern A (recommended start):** multi domain → one Gmail.  
 **Pattern B:** multi domain + multi Gmail pairs via `identities.json`.
