@@ -1,0 +1,13 @@
+[Unit]
+Description=Grok Farm soft reconcile vs 9router (report only)
+Documentation=https://github.com/fazulfi/grok-farm
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=magadirxwin
+Group=magadirxwin
+WorkingDirectory=/home/magadirxwin/grok-farm
+ExecStart=/bin/bash /home/magadirxwin/grok-farm/scripts/reconcile_soft.sh
+Nice=10
+PrivateTmp=true

@@ -1,0 +1,11 @@
+[Unit]
+Description=Grok Farm soft reconcile every 12 hours
+Requires=grok-farm-reconcile.service
+
+[Timer]
+OnCalendar=*-*-* 03,15:30:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target
