@@ -68,15 +68,21 @@ install_unit systemd/grok-farm-backup.service grok-farm-backup.service
 install_unit systemd/grok-farm-backup.timer grok-farm-backup.timer
 install_unit systemd/grok-farm-health.service grok-farm-health.service
 install_unit systemd/grok-farm-health.timer grok-farm-health.timer
+install_unit systemd/grok-farm-probe.service grok-farm-probe.service
+install_unit systemd/grok-farm-probe.timer grok-farm-probe.timer
+install_unit systemd/grok-farm-reconcile.service grok-farm-reconcile.service
+install_unit systemd/grok-farm-reconcile.timer grok-farm-reconcile.timer
+install_unit systemd/grok-farm-mark-expired.service grok-farm-mark-expired.service
+install_unit systemd/grok-farm-mark-expired.timer grok-farm-mark-expired.timer
 sudo systemctl daemon-reload
-if [[ -f systemd/grok-farm-backup.timer ]]; then
-  sudo systemctl enable --now grok-farm-backup.timer
-fi
-if [[ -f systemd/grok-farm-health.timer ]]; then
-  sudo systemctl enable --now grok-farm-health.timer
-fi
+for t in grok-farm-backup.timer grok-farm-health.timer grok-farm-probe.timer \
+         grok-farm-reconcile.timer grok-farm-mark-expired.timer; do
+  if [[ -f "/etc/systemd/system/\$t" ]] || systemctl cat "\$t" &>/dev/null; then
+    sudo systemctl enable --now "\$t" || true
+  fi
+done
 echo "systemd units refreshed (farmer NOT restarted — run: sudo systemctl restart grok-farmer if needed)"
 echo "OK deploy complete on \$(hostname)"
 EOF
 
-echo "Done. Next on VPS: edit .env if needed; farmer not auto-restarted. Health/backup timers enabled when units present."
+echo "Done. Next on VPS: edit .env if needed; farmer not auto-restarted. Health/backup/probe/reconcile/mark-expired timers enabled when units present."
