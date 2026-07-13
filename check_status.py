@@ -289,6 +289,8 @@ def main() -> int:
     # Live probe inventory (soft): needs_relogin flag + last_probe_status breakdown
     needs_relogin_count = 0
     probe_status_breakdown: dict[str, int] = {}
+    probed_count = 0
+    unprobed_count = 0
     try:
         needs_relogin_count = int(
             conn.execute(
@@ -304,6 +306,14 @@ def main() -> int:
             key, cnt = r[0], r[1]
             if key:
                 probe_status_breakdown[str(key)] = int(cnt)
+        probed_count = int(
+            conn.execute(
+                """SELECT COUNT(*) FROM accounts
+                   WHERE last_probe_status IS NOT NULL AND last_probe_status != ''"""
+            ).fetchone()[0]
+            or 0
+        )
+        unprobed_count = max(0, int(total or 0) - probed_count)
     except sqlite3.Error:
         pass
     conn.close()
@@ -311,6 +321,46 @@ def main() -> int:
     id_cfg = identity_report()
     configured = set(id_cfg.get("domains") or [])
     inventory_only = sorted(set(inv_domains) - configured) if configured else []
+
+    def _pct(n: int, den: int) -> float:
+        if not den:
+            return 0.0
+        return round(100.0 * float(n) / float(den), 1)
+
+    # Soft policy dashboard: offline JWT + live probe inventory (never hard-flips)
+    th_ok = int(token_counts.get("ok") or 0)
+    th_soon = int(token_counts.get("expiring_soon") or 0)
+    th_exp = int(token_counts.get("expired") or 0)
+    th_inv = int(token_counts.get("invalid") or 0)
+    th_miss = int(token_counts.get("missing") or 0)
+    alive_n = int(probe_status_breakdown.get("alive") or 0)
+    jwt_exp_probe = int(probe_status_breakdown.get("jwt_expired") or 0)
+    soft_policy = {
+        "policy": "soft",
+        "note": "meta only; no default injected→error",
+        "total": int(total or 0),
+        "jwt_offline": {
+            "ok": th_ok,
+            "expiring_soon": th_soon,
+            "expired": th_exp,
+            "invalid": th_inv,
+            "missing": th_miss,
+            "ok_pct": _pct(th_ok, int(total or 0)),
+            "expired_pct": _pct(th_exp, int(total or 0)),
+            "healthy_pct": _pct(th_ok + th_soon, int(total or 0)),
+        },
+        "live_probe": {
+            "probed": probed_count,
+            "unprobed": unprobed_count,
+            "probed_pct": _pct(probed_count, int(total or 0)),
+            "needs_relogin": needs_relogin_count,
+            "needs_relogin_pct": _pct(needs_relogin_count, int(total or 0)),
+            "alive": alive_n,
+            "alive_pct_of_probed": _pct(alive_n, probed_count),
+            "jwt_expired_probe": jwt_exp_probe,
+            "by_status": dict(probe_status_breakdown),
+        },
+    }
 
     report["accounts"] = {
         "total": total,
@@ -320,9 +370,12 @@ def main() -> int:
         "error": by_status.get("error", 0),
     }
     report["token_health"] = token_counts
+    report["soft_policy"] = soft_policy
     report["probe"] = {
         "needs_relogin": needs_relogin_count,
         "last_probe_status": probe_status_breakdown,
+        "probed": probed_count,
+        "unprobed": unprobed_count,
     }
     if probe_stats is not None:
         report["probe_run"] = probe_stats
@@ -374,8 +427,20 @@ def main() -> int:
         f"farmed={a['farmed']} error={a['error']}"
     )
     print(f"tokens:     {token_counts}")
+    sp = report.get("soft_policy") or {}
+    jo = sp.get("jwt_offline") or {}
+    lp = sp.get("live_probe") or {}
+    print(
+        f"soft_policy: jwt ok={jo.get('ok_pct')}% expired={jo.get('expired_pct')}% "
+        f"healthy={jo.get('healthy_pct')}% | "
+        f"probe covered={lp.get('probed_pct')}% "
+        f"needs_relogin={lp.get('needs_relogin')} ({lp.get('needs_relogin_pct')}%) "
+        f"alive={lp.get('alive')} ({lp.get('alive_pct_of_probed')}% of probed) "
+        f"unprobed={lp.get('unprobed')}"
+    )
     print(
         f"probe:      needs_relogin={needs_relogin_count} "
+        f"probed={probed_count} unprobed={unprobed_count} "
         f"last_status={probe_status_breakdown or {}}"
     )
     if probe_stats is not None:
