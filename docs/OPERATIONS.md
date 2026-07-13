@@ -112,13 +112,15 @@ See RUNBOOK **R10** (expired JWT), **R13** (probe, large batch), **R14**
 
 ### 2.2 Expected steady state
 
+Product model = **autofarm + auto-inject** (not session management). After inject, token alive/dead is 9router/consumer concern; soft probe/JWT noise on farm is optional.
+
 - `grok-farmer`: **active (running)**
 - Concurrent Camoufox parents ≈ adaptive `CONCURRENT` (base 3, bounds 1–5 when `GROK_ADAPTIVE_CONCURRENT=1`)
 - `workflow_pools` / `usa_proxies.txt` line count ≈ proxyPools count
-- `farmed` backlog near **0** after each successful inject cycle
+- `farmed` backlog near **0** after each successful inject cycle (on-path inject; no backlog “session queue”)
+- Soft `needs_relogin` / offline JWT % may be high without meaning farm failure
 - Swap present if concurrent ≥ 3
-- Backup log age &lt; ~2h when timer enabled; objects on S3 end with `.tgz.age`
-- `akun.db` mode 600
+- Backup log age &lt; ~2h when timer enabled; objects on S3 end with `.tgz.age`- `akun.db` mode 600
 
 ---
 
@@ -312,7 +314,9 @@ Do **not** hand-edit `usa_proxies.txt` for production; it is overwritten by sync
 
 ---
 
-## 5. Account inventory
+## 5. Account inventory (pipeline marks)
+
+`akun.db` is **pipeline bookkeeping** for farm → inject, not a session manager. Health/probe tools are observability; they do not reauth or heal gateway sessions.
 
 ```bash
 # Summary + token health + proxy scores
@@ -327,13 +331,13 @@ sqlite3 ~/grok-farm/akun.db \
   "SELECT proxy_key, success_count, fail_count, score FROM proxy_stats ORDER BY score DESC LIMIT 10;"
 ```
 
-Statuses:
+Statuses (inject-queue marks only):
 
 | Status | Meaning |
 |--------|---------|
-| `farmed` | Tokens in DB, not yet on 9router |
-| `injected` | Present on 9router (grok-cli path) |
-| `error` | Failed inject or expired token (`notes`) |
+| `farmed` | Tokens in DB, waiting on-path inject (steady state ≈ 0) |
+| `injected` | Handoff to 9router succeeded — farm no longer owns session validity |
+| `error` | Pipeline failure or dead farmed JWT (`notes`); capacity recovery = re-farm + inject |
 
 ---
 

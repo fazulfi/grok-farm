@@ -131,8 +131,9 @@ Note: free OAuth JWT on `api.x.ai` may hit spending-limit; **Grok CLI path** is 
 
 ### 5.4 Idempotency
 
-Re-running inject **updates** existing connection `data` (token refresh + proxy reassignment). Safe to retry.
+Re-running inject **updates** existing connection `data` (new farmed tokens + proxy reassignment when the farm re-injects the same email). Safe to retry.
 
+This is **pipeline re-inject**, not session management: the farm does not refresh tokens in place or keep gateway sessions alive. After a successful inject, token validity is a **9router / consumer** concern.
 ---
 
 ## 6. HTTP API alternative (partial)
@@ -166,6 +167,8 @@ Gateway host in DE/EU **must not** egress Grok 4.5 without proxy.
 ---
 
 ## 8. Reconcile inventory (gateway vs farm)
+
+**Purpose:** optional ops diff between 9router `providerConnections` and farm `akun.db` marks. **Not** session recovery — does not reauth, revoke, or heal tokens.
 
 Diff **9router `providerConnections`** against farm **`akun.db`** without printing tokens.
 

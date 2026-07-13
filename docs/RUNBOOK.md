@@ -202,9 +202,10 @@ Hard refresh browser dashboard.
 |------------|-----------------|
 | `farmed` | Always mark `status=error`, `notes=token_expired` or `bad_token` (import fail-closed + mark CLI) |
 | `injected` | **Enterprise default = soft only**: refresh `token_exp` / `token_health`; do **not** set `status=error` (preserves 9router `grok_cli_connection_id` / inject marks). Optional `--include-injected` hard-marks inventory only — still **no** gateway revoke |
-| Gateway | **No auto-delete** of 9router `providerConnections` — re-farm or re-auth is a separate operator decision |
+| Gateway | **No auto-delete** of 9router `providerConnections`. Farm product does **not** re-auth; capacity recovery = **re-farm + re-inject** (consumer/9router owns post-inject validity) |
 
-**Recommended default:** run `mark_expired_tokens.py` without `--include-injected`. Soft health issue `many_expired_tokens` is inventory noise, not SEV1.
+**Recommended default:** run `mark_expired_tokens.py` without `--include-injected`. Soft health issue `many_expired_tokens` is inventory noise, not SEV1. Soft meta ≠ session management.
+
 
 ### Commands
 
@@ -229,8 +230,8 @@ python3 mark_expired_tokens.py --include-injected
 
 1. `python3 check_status.py` — `farmed` should not hold expired tokens; hard issue `farmed_expired_tokens` cleared
 2. Soft `many_expired_tokens` may remain if injected JWTs aged out and you did **not** use `--include-injected`
-3. To restore capacity: farm fresh accounts (realistic local-parts) → import → workflow inject
-4. Optionally prune dead gateway connections on 9router (manual SQL / UI) — out of band from this CLI
+3. To restore capacity: **re-farm** fresh accounts → import → workflow inject (not browser re-auth on old rows)
+4. Optionally prune dead gateway connections on 9router (manual SQL / UI) — out of band from this CLI; farm is not a session manager
 
 ### Do not
 
@@ -309,15 +310,16 @@ If age is not on PATH, decrypt on Linux/VPS that has the vaulted identity.
 
 ## R13 — Live token probe / `needs_relogin` inventory
 
-**Goal:** Know which injected JWTs still work against xAI **without**
-full browser re-auth.
+**Goal:** Optional **observability** — sample which injected JWTs still work
+against xAI. This is **not** session recovery and **not** a re-auth workflow.
+Farm product scope remains autofarm + auto-inject only.
 
 **Endpoint:** `GET https://api.x.ai/v1/models` with
 `Authorization: Bearer <access_token>` (stdlib only).
 
 **Default policy is soft:** write `last_probe_*` + `needs_relogin` meta only.
-Do **not** pass `--mark-error` unless you have a re-auth plan.
-
+Do **not** pass `--mark-error` unless you intentionally hard-mark inventory
+(still no reauth; capacity recovery = re-farm + inject).
 ### Large-batch soft probe (P0)
 
 Use a capped soft run against injected inventory. Selection order is stable
@@ -377,15 +379,15 @@ python3 probe_tokens.py --mark-error --limit 10
 
 **Notes:**
 
-- Offline `jwt_expired` ≠ ban; Discord FYI: re-login inventory, not “coid”.
+- Offline `jwt_expired` ≠ ban; Discord FYI: soft inventory noise, not “coid”.
 - Soft policy keeps gateway inject IDs; hard `--mark-error` only when operator
   accepts losing inject-queue semantics for those rows.
-- Full browser re-auth is **out of scope** for v2.2.x — use inventory later.
+- Full browser re-auth / session refresh is **out of scope** (farm-only product).
+  High `needs_relogin` is expected under soft policy and does **not** mean farm failure.
 - After large soft probe: `python3 reconcile_9router.py --json`
-  (bucket `needs_relogin_db`).
+  (bucket `needs_relogin_db`) — diff only, not recovery.
 
-**Do not:** mass `--mark-error` on injected without a re-auth plan.
-
+**Do not:** mass `--mark-error` on injected expecting reauth; farm does not manage sessions.
 ---
 
 ## R14 — Reconcile 9router vs `akun.db`

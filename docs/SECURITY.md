@@ -199,8 +199,8 @@ magadirxwin ALL=(root) NOPASSWD: /bin/systemctl start grok-farmer, /bin/systemct
 - **Import fail-closed:** `import_db.py` / `workflow.import_batches` insert dead JWT as `status=error` (`notes=token_expired|bad_token`), never as injectable `farmed`
 - **Inject path:** workflow skips inject for expired/invalid → `status=error`
 - **Batch cleanup:** `python3 mark_expired_tokens.py` (farmed-only default) or `python3 check_status.py --mark-expired`
-- **Injected inventory (enterprise default = soft):** leave `status=injected`, refresh meta only (`many_expired_tokens` soft issue). **Do not** cron `--include-injected` — preserves 9router connection IDs / inject marks. Optional hard-mark is inventory hygiene only and **does not** revoke gateway `providerConnections` (see RUNBOOK R10)
-
+- **Injected inventory (enterprise default = soft):** leave `status=injected`, update JWT meta only (`many_expired_tokens` soft issue). **Do not** cron `--include-injected` — preserves 9router connection IDs / inject marks. Optional hard-mark is inventory hygiene only and **does not** revoke gateway `providerConnections` (see RUNBOOK R10)
+- **Soft meta ≠ session manager:** probe/`needs_relogin`/`token_health` on injected rows are observability only. Farm does **not** re-auth or keep sessions alive after inject; post-inject validity is 9router/consumer
 ---
 
 ## 9. Compliance note
