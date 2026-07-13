@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Grok Farm encrypted backup
+Requires=grok-farm-backup.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

@@ -70,7 +70,7 @@ copy_if "$HOME/.ssh/id_ed25519.pub" "$STAGE/ssh/id_ed25519.pub"
 copy_if "$HOME/.ssh/config" "$STAGE/ssh/config"
 for f in brutal_farmer.sh workflow.py sync_proxies_from_9r.py import_db.py check_status.py \
          log_redact.py token_util.py alerts.py db_schema.py email_identity.py name_gen.py \
-         mark_expired_tokens.py; do
+         mark_expired_tokens.py probe_tokens.py adaptive_concurrent.py reconcile_9router.py; do
   copy_if "$FARM_DIR/$f" "$STAGE/app/$f"
 done
 copy_if "$FARM_DIR/identities.json" "$STAGE/credentials/identities.json"
@@ -130,7 +130,9 @@ LATEST="s3://${S3_BUCKET}/${S3_PREFIX}/${HOST}/latest.${EXT}"
 echo "Upload $KEY"
 export S3_ENDPOINT S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
 PY_UPLOAD="${FARM_DIR}/scripts/s3_upload.py"
-if [[ -x /opt/aws-cli-venv/bin/python ]]; then
+if [[ -x "$FARM_DIR/.venv/bin/python" ]]; then
+  PYBIN="$FARM_DIR/.venv/bin/python"
+elif [[ -x /opt/aws-cli-venv/bin/python ]]; then
   PYBIN=/opt/aws-cli-venv/bin/python
 else
   PYBIN=python3
