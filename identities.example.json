@@ -2,21 +2,24 @@
   "identities": [
     {
       "id": "primary",
-      "imap_user": "magadirxwin@gmail.com",
+      "imap_user": "primary@gmail.com",
       "imap_pass": "xxxx xxxx xxxx xxxx",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["budgezen.com", "mypapyr.com"],
+      "domains": ["domain-a.com", "domain-b.com"],
       "weight": 1,
       "enabled": true
     },
     {
       "id": "secondary",
-      "imap_user": "other@gmail.com",
+      "imap_user": "secondary@gmail.com",
       "imap_pass": "yyyy yyyy yyyy yyyy",
-      "domains": ["another-domain.com"],
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993,
+      "domains": ["domain-b.com"],
       "weight": 1,
-      "enabled": false
+      "enabled": false,
+      "_comment": "Pattern B: enable only after Cloudflare Email Routing destination + catch-all for domain-b → this Gmail is Active. Remove domain-b from primary when enabling."
     }
   ]
 }
