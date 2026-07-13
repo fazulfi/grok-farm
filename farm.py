@@ -319,14 +319,63 @@ def _get_turnstile_sem() -> asyncio.Semaphore:
     return _turnstile_sem
 
 
+def _proxy_skip_and_scores() -> tuple[set[str], dict[str, float]]:
+    """Load soft-skip keys + scores from proxy_stats (fail-open on any DB error)."""
+    try:
+        from db_schema import connect, migrate, proxies_to_skip
+
+        conn = connect()
+        migrate(conn)
+        skip = proxies_to_skip(conn)
+        scores: dict[str, float] = {}
+        try:
+            for r in conn.execute("SELECT proxy_key, score FROM proxy_stats"):
+                try:
+                    k = str(r[0] if not hasattr(r, "keys") else r["proxy_key"] or "")
+                    s = float(r[1] if not hasattr(r, "keys") else r["score"] or 0.5)
+                    if k:
+                        scores[k] = max(0.01, min(1.0, s))
+                except (TypeError, ValueError, KeyError, IndexError):
+                    continue
+        except Exception:
+            pass
+        conn.close()
+        return skip, scores
+    except Exception:
+        return set(), {}
+
+
 async def next_proxy():
+    """Pick next farm proxy: soft-skip bad proxy_stats keys, score-weighted, fail-open.
+
+    Never empties the pool via soft skip alone. Falls back to round-robin if needed.
+    """
     global _proxy_idx
     if not PROXY_POOL:
         return (None, "")
     async with _proxy_lock:
-        url, pid = PROXY_POOL[_proxy_idx % len(PROXY_POOL)]
-        _proxy_idx += 1
-        return (url, pid)
+        try:
+            from db_schema import proxy_key as _pk
+
+            skip, scores = _proxy_skip_and_scores()
+            eligible = [(u, p) for (u, p) in PROXY_POOL if _pk(u) not in skip]
+            if not eligible:
+                # fail-open: never empty farm pool via soft skip alone
+                eligible = list(PROXY_POOL)
+            # Score-weighted pick among eligible (mirror workflow.pick_proxy)
+            weights = [scores.get(_pk(u), 0.5) for (u, _) in eligible]
+            weights = [max(0.01, float(w)) for w in weights]
+            # random.choices needs same-length weights
+            idx = random.choices(range(len(eligible)), weights=weights, k=1)[0]
+            url, pid = eligible[idx]
+            # advance RR cursor for fallback/debug observability
+            _proxy_idx = (_proxy_idx + 1) % max(len(PROXY_POOL), 1)
+            return (url, pid)
+        except Exception:
+            # pure RR fallback
+            url, pid = PROXY_POOL[_proxy_idx % len(PROXY_POOL)]
+            _proxy_idx += 1
+            return (url, pid)
 
 
 def _parse_proxy(url: str) -> dict:
@@ -754,6 +803,35 @@ def _record_domain_outcome(email_addr: str, success: bool) -> None:
         domain = email_addr.rsplit("@", 1)[-1]
         when = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         record_domain_result_standalone(domain, success, email=email_addr, when_iso=when)
+    except Exception:
+        pass
+
+
+def _record_proxy_outcome(
+    proxy_url: str,
+    success: bool,
+    email: str = "",
+    fail_reason: str = "",
+) -> None:
+    """Best-effort proxy_stats update after farm attempt (soft-skip signal for inject+farm)."""
+    if not proxy_url:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        from db_schema import classify_proxy_fail, record_proxy_result_standalone
+
+        when = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        reason = ""
+        if not success:
+            reason = classify_proxy_fail(fail_reason or "unknown")
+        record_proxy_result_standalone(
+            proxy_url,
+            success,
+            email=email,
+            when_iso=when,
+            fail_reason=reason,
+        )
     except Exception:
         pass
 
@@ -2947,6 +3025,7 @@ async def _do_register(attempt_num: int) -> dict | None:
         await save_result_to_file(result)
         emit_success(attempt_num, email_addr, "Account farmed (tokens saved)")
         _record_domain_outcome(email_addr, True)
+        _record_proxy_outcome(proxy_url or "", True, email=email_addr)
         return result
     except asyncio.TimeoutError:
         msg = f"account timeout after {ACCOUNT_TIMEOUT_S}s (stuck / unclear state)"
@@ -2957,6 +3036,7 @@ async def _do_register(attempt_num: int) -> dict | None:
         except Exception:
             pass
         _record_domain_outcome(email_addr, False)
+        _record_proxy_outcome(proxy_url or "", False, email=email_addr, fail_reason="timeout")
         return None
     except Exception as e:
         print(f"[{attempt_num}] FAILED: {e}", flush=True)
@@ -2968,6 +3048,9 @@ async def _do_register(attempt_num: int) -> dict | None:
         # Count domain fail for OTP/catch-all issues; still record other fails so
         # consecutive dead domains auto-skip (operator can re-enable after fix).
         _record_domain_outcome(email_addr, False)
+        _record_proxy_outcome(
+            proxy_url or "", False, email=email_addr, fail_reason=str(e)[:200]
+        )
         return None
 
 
