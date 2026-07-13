@@ -4,8 +4,40 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
-from typing import Any, Optional
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from typing import Any, Optional, Sequence
+
+# Live probe against xAI API (stdlib only — no new deps).
+DEFAULT_PROBE_URL = "https://api.x.ai/v1/models"
+DEFAULT_PROBE_TIMEOUT = 10.0
+
+# Probe status enum (soft inventory; does not flip account status unless CLI asks).
+PROBE_STATUSES = (
+    "alive",
+    "needs_relogin",
+    "rate_limited",
+    "spend_limited",
+    "network_error",
+    "invalid",
+    "missing",
+    "jwt_expired",
+)
+
+_SPEND_HINTS = (
+    "spend",
+    "quota",
+    "credit",
+    "billing",
+    "usage limit",
+    "usage_limit",
+    "exceeded",
+    "insufficient",
+    "payment",
+)
 
 
 def _b64url_decode(segment: str) -> bytes:
@@ -70,6 +102,21 @@ def ensure_token_columns(conn) -> None:
         conn.execute("ALTER TABLE accounts ADD COLUMN token_health TEXT")
 
 
+def ensure_probe_columns(conn) -> None:
+    """Add live-probe meta columns if missing (idempotent, additive)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+    if "last_probe_at" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_probe_at TEXT")
+    if "last_probe_status" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_probe_status TEXT")
+    if "last_probe_http" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_probe_http INTEGER")
+    if "needs_relogin" not in cols:
+        conn.execute(
+            "ALTER TABLE accounts ADD COLUMN needs_relogin INTEGER DEFAULT 0"
+        )
+
+
 def update_account_token_meta(conn, email: str, access_token: str, warn_seconds: int = 3600) -> str:
     """Write token_exp + token_health for one account; return health label."""
     ensure_token_columns(conn)
@@ -80,6 +127,307 @@ def update_account_token_meta(conn, email: str, access_token: str, warn_seconds:
         (exp, health, email),
     )
     return health
+
+
+def _probe_url() -> str:
+    return (os.environ.get("GROK_TOKEN_PROBE_URL") or DEFAULT_PROBE_URL).strip() or DEFAULT_PROBE_URL
+
+
+def _probe_timeout(default: float = DEFAULT_PROBE_TIMEOUT) -> float:
+    raw = (os.environ.get("GROK_TOKEN_PROBE_TIMEOUT") or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return default
+
+
+def _body_spend_limited(body: str) -> bool:
+    low = (body or "").lower()
+    return any(h in low for h in _SPEND_HINTS)
+
+
+def _probe_result(
+    status: str,
+    *,
+    http_code: Optional[int] = None,
+    error: Optional[str] = None,
+    offline_health: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "http_code": http_code,
+        "error": error,
+        "offline_health": offline_health,
+    }
+
+
+def probe_access_token(
+    access_token: str,
+    *,
+    timeout: float = DEFAULT_PROBE_TIMEOUT,
+    url: Optional[str] = None,
+    skip_expired: Optional[bool] = None,
+) -> dict[str, Any]:
+    """
+    Live HTTP probe of an access token against xAI models endpoint.
+
+    Returns dict keys: status, http_code, error, offline_health.
+    Status: alive|needs_relogin|rate_limited|spend_limited|network_error|
+            invalid|missing|jwt_expired
+
+    Never logs the full JWT.
+    """
+    health = token_health(access_token)
+    if skip_expired is None:
+        skip_expired = _env_bool("GROK_PROBE_SKIP_EXPIRED", True)
+
+    if not access_token:
+        return _probe_result("missing", offline_health=health, error="empty token")
+    if health == "missing":
+        return _probe_result("missing", offline_health=health, error="empty token")
+    if health == "invalid":
+        return _probe_result("invalid", offline_health=health, error="not a JWT")
+    if health == "expired" and skip_expired:
+        return _probe_result(
+            "jwt_expired",
+            offline_health=health,
+            error="offline exp passed; skipped HTTP",
+        )
+
+    probe_url = (url or _probe_url()).strip() or DEFAULT_PROBE_URL
+    to = float(timeout) if timeout is not None else _probe_timeout()
+    req = urllib.request.Request(
+        probe_url,
+        method="GET",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "User-Agent": "grok-farm-probe/2.2",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=to) as resp:
+            code = int(getattr(resp, "status", None) or resp.getcode() or 0)
+            try:
+                body = resp.read(4096).decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            if 200 <= code <= 299:
+                if _body_spend_limited(body):
+                    return _probe_result(
+                        "spend_limited",
+                        http_code=code,
+                        offline_health=health,
+                        error="spend/quota hint in 2xx body",
+                    )
+                return _probe_result("alive", http_code=code, offline_health=health)
+            # Unexpected non-error path
+            return _probe_result(
+                "network_error",
+                http_code=code,
+                offline_health=health,
+                error=f"unexpected status {code}",
+            )
+    except urllib.error.HTTPError as e:
+        code = int(e.code or 0)
+        try:
+            body = e.read(4096).decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        if code in (401, 403):
+            return _probe_result(
+                "needs_relogin",
+                http_code=code,
+                offline_health=health,
+                error=f"HTTP {code}",
+            )
+        if code == 429:
+            return _probe_result(
+                "rate_limited",
+                http_code=code,
+                offline_health=health,
+                error="HTTP 429",
+            )
+        if code == 402 or _body_spend_limited(body):
+            return _probe_result(
+                "spend_limited",
+                http_code=code,
+                offline_health=health,
+                error=f"HTTP {code} spend/quota",
+            )
+        if 500 <= code <= 599:
+            return _probe_result(
+                "network_error",
+                http_code=code,
+                offline_health=health,
+                error=f"server HTTP {code}",
+            )
+        return _probe_result(
+            "network_error",
+            http_code=code,
+            offline_health=health,
+            error=f"HTTP {code}",
+        )
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        return _probe_result(
+            "network_error",
+            offline_health=health,
+            error=f"urlerror: {reason}",
+        )
+    except TimeoutError:
+        return _probe_result(
+            "network_error",
+            offline_health=health,
+            error="timeout",
+        )
+    except Exception as e:
+        return _probe_result(
+            "network_error",
+            offline_health=health,
+            error=f"{type(e).__name__}: {e}",
+        )
+
+
+def update_account_probe(
+    conn,
+    email: str,
+    result: dict[str, Any],
+    *,
+    mark: bool = True,
+) -> None:
+    """
+    Persist last_probe_* meta for one account.
+
+    needs_relogin:
+      - set 1 if status == needs_relogin
+      - set 0 if status == alive
+      - leave unchanged on network_error / rate_limited / spend_limited / offline skips
+    """
+    ensure_probe_columns(conn)
+    if not mark:
+        return
+    status = str(result.get("status") or "")
+    http_code = result.get("http_code")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        http_int = int(http_code) if http_code is not None else None
+    except (TypeError, ValueError):
+        http_int = None
+
+    if status == "needs_relogin":
+        conn.execute(
+            """UPDATE accounts SET last_probe_at=?, last_probe_status=?,
+               last_probe_http=?, needs_relogin=1 WHERE email=?""",
+            (now_iso, status, http_int, email),
+        )
+    elif status == "alive":
+        conn.execute(
+            """UPDATE accounts SET last_probe_at=?, last_probe_status=?,
+               last_probe_http=?, needs_relogin=0 WHERE email=?""",
+            (now_iso, status, http_int, email),
+        )
+    else:
+        # Do not clear needs_relogin on transient / offline classifications
+        conn.execute(
+            """UPDATE accounts SET last_probe_at=?, last_probe_status=?,
+               last_probe_http=? WHERE email=?""",
+            (now_iso, status, http_int, email),
+        )
+
+
+def probe_accounts(
+    conn,
+    *,
+    statuses: Sequence[str] = ("injected",),
+    limit: Optional[int] = None,
+    dry_run: bool = False,
+    mark: bool = True,
+    skip_expired: bool = True,
+    timeout: Optional[float] = None,
+    url: Optional[str] = None,
+    mark_error: bool = False,
+) -> dict[str, Any]:
+    """
+    Probe accounts with given statuses (sequential). Soft by default:
+    updates last_probe_* meta only; never flips injected→error unless mark_error.
+
+    Returns stats dict with counts per status + scanned/probed/marked/errors.
+    """
+    ensure_token_columns(conn)
+    ensure_probe_columns(conn)
+    status_list = tuple(s for s in statuses if s)
+    if not status_list:
+        status_list = ("injected",)
+    placeholders = ",".join("?" for _ in status_list)
+    sql = f"""SELECT email, access_token, status FROM accounts
+              WHERE status IN ({placeholders})
+              ORDER BY id ASC"""
+    rows = conn.execute(sql, status_list).fetchall()
+    if limit is not None and limit > 0:
+        rows = rows[: int(limit)]
+
+    to = timeout if timeout is not None else _probe_timeout()
+    stats: dict[str, Any] = {
+        "scanned": 0,
+        "probed": 0,
+        "marked": 0,
+        "marked_error": 0,
+        "dry_run": 1 if dry_run else 0,
+        "skip_expired": 1 if skip_expired else 0,
+        "by_status": {s: 0 for s in PROBE_STATUSES},
+    }
+
+    for row in rows:
+        if hasattr(row, "keys"):
+            email = row["email"]
+            at = row["access_token"] or ""
+            acct_status = row["status"]
+        else:
+            email, at, acct_status = row[0], row[1] or "", row[2]
+        stats["scanned"] += 1
+        result = probe_access_token(
+            at,
+            timeout=to,
+            url=url,
+            skip_expired=skip_expired,
+        )
+        st = str(result.get("status") or "invalid")
+        stats["probed"] += 1
+        stats["by_status"][st] = stats["by_status"].get(st, 0) + 1
+
+        if dry_run:
+            continue
+
+        if mark:
+            update_account_probe(conn, email, result, mark=True)
+            stats["marked"] += 1
+
+        # Optional hard mark: only when operator passes mark_error
+        if mark_error and st == "needs_relogin" and acct_status in ("injected", "farmed"):
+            conn.execute(
+                """UPDATE accounts SET status='error', notes=?
+                   WHERE email=? AND status=?""",
+                ("needs_relogin", email, acct_status),
+            )
+            stats["marked_error"] += 1
+
+    if not dry_run:
+        conn.commit()
+    return stats
 
 
 def mark_expired_accounts(

@@ -6,7 +6,7 @@ import os
 import sqlite3
 from typing import Optional
 
-from token_util import ensure_token_columns
+from token_util import ensure_probe_columns, ensure_token_columns
 
 DEFAULT_DB = os.path.expanduser("~/grok-farm/akun.db")
 
@@ -111,6 +111,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(PROXY_STATS_DDL)
     conn.executescript(DOMAIN_STATS_DDL)
     ensure_token_columns(conn)
+    ensure_probe_columns(conn)
     conn.commit()
 
 
