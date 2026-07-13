@@ -1,0 +1,11 @@
+[Unit]
+Description=Grok Farm mark-expired farmed every 30 minutes
+Requires=grok-farm-mark-expired.service
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+RandomizedDelaySec=3m
+
+[Install]
+WantedBy=timers.target
