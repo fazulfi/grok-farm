@@ -5,9 +5,26 @@ All notable changes to Grok Farm are documented here.
 ## [Unreleased]
 
 ### Planned
-- Multi-Gmail Pattern B production rollout (`identities.json`)
-- S3 retention policy automation beyond one-shot plaintext cleanup
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` (gateway-side revoke optional)
+- Optional health-check systemd timer → webhook when `GROK_ALERT_WEBHOOK` set
+
+## [2.1.2] — 2026-07-13
+
+### Added
+- **S3 retention via boto3** (`s3_upload.py --retention`): no `aws` CLI dependency; keeps `latest.*` + `LATEST.txt`; deletes dated `*.tgz.age` / leftover plaintext older than `RETENTION_DAYS`
+- RUNBOOK **R11** multi-Gmail Pattern B (Cloudflare destination + `identities.json`); **R12** retention + Windows age CLI
+- `identities.example.json` Pattern B comments; backup packs `identities.json` into encrypted archive when present
+- `.env.example` documents `RETENTION_DAYS=14`
+
+### Changed
+- `s3_backup.sh` calls boto3 retention after upload (replaces fragile aws-cli subprocess)
+- Expired injected JWT policy docs: soft meta default is **recommended enterprise** (preserve gateway IDs)
+- SECURITY: Windows age install paths; multi-Gmail secret hygiene; alerts leave webhook unset if unused
+- OPERATIONS: multi-Gmail Pattern B ops + S3 retention workflow
+
+### Security
+- Multi-Gmail App Passwords stay VPS-only (`identities.json` mode 600); never commit real credentials
+- Encrypted S3 backups include `identities.json` when present (age-encrypted archive)
 
 ## [2.1.1] — 2026-07-13
 
