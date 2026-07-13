@@ -4,11 +4,22 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Health-check systemd timer** (`systemd/grok-farm-health.{service,timer}` +
+  `scripts/health_check.sh`): every 15 min runs inventory-only
+  `check_status.py --json` (no `--probe` / `--mark-error`); logs
+  `logs/health_check.log`; webhook via `alerts.py` on exit 2 / failure when
+  `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` set
+- `deploy_farm_vps.sh` installs/enables backup + health timers (farmer unit
+  refreshed, **not** restarted)
+- Docs: OPERATIONS §1/§2.1/§10, DEPLOYMENT §2.5/§6b, SECURITY Alerts, RUNBOOK **R17**
+
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
-  `needs_relogin` (browser path optional)
-- Optional health-check systemd timer → webhook when `GROK_ALERT_WEBHOOK` set
+  `needs_relogin` (browser path optional) — **out of scope** for farm-only
+  roadmap until operator re-enables
 
 ## [2.2.2] — 2026-07-13
 
