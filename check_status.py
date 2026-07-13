@@ -291,6 +291,8 @@ def main() -> int:
     probe_status_breakdown: dict[str, int] = {}
     probed_count = 0
     unprobed_count = 0
+    proxy_skip_n = 0
+    proxy_disabled_n = 0
     try:
         needs_relogin_count = int(
             conn.execute(
@@ -316,6 +318,19 @@ def main() -> int:
         unprobed_count = max(0, int(total or 0) - probed_count)
     except sqlite3.Error:
         pass
+    try:
+        from db_schema import proxies_to_skip
+
+        proxy_skip_n = len(proxies_to_skip(conn))
+        proxy_disabled_n = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM proxy_stats WHERE disabled=1"
+            ).fetchone()[0]
+            or 0
+        )
+    except Exception:
+        proxy_skip_n = 0
+        proxy_disabled_n = 0
     conn.close()
 
     id_cfg = identity_report()
@@ -389,35 +404,59 @@ def main() -> int:
     if mark_stats is not None:
         report["mark_expired"] = mark_stats
 
-    # overall health flag
-    issues = []
+    # overall health: hard issues → exit 3 (webhook); soft → exit 2 (log only)
+    issues_hard: list[str] = []
+    issues_soft: list[str] = []
     if report["farmer"] != "active":
-        issues.append("farmer_not_active")
+        issues_hard.append("farmer_not_active")
     if report["accounts"]["farmed"] > 50:
-        issues.append("large_farmed_backlog")
+        issues_hard.append("large_farmed_backlog")
     if report["farmed_expired"] > 0:
-        issues.append("farmed_expired_tokens")
-    elif token_counts.get("expired", 0) > 50:
+        issues_hard.append("farmed_expired_tokens")
+    if token_counts.get("expired", 0) > 50:
         # soft inventory signal only — does not fail inject of healthy farmed
-        issues.append("many_expired_tokens")
+        issues_soft.append("many_expired_tokens")
     if needs_relogin_count > 0:
         # soft inventory — re-auth needed; does not stop farmer
-        issues.append("needs_relogin")
+        issues_soft.append("needs_relogin")
     if report["backup"].get("status") in ("stale", "no_log"):
-        issues.append("backup_" + str(report["backup"].get("status")))
+        issues_hard.append("backup_" + str(report["backup"].get("status")))
     disk = report.get("disk") or {}
     if isinstance(disk.get("used_pct"), (int, float)) and disk["used_pct"] >= 90:
-        issues.append("disk_high")
+        issues_hard.append("disk_high")
     if id_cfg.get("error"):
-        issues.append("identity_config_error")
+        issues_hard.append("identity_config_error")
     elif id_cfg.get("mode") == "domain" and not (id_cfg.get("domains") or []):
-        issues.append("no_email_domains")
+        issues_hard.append("no_email_domains")
+    # proxy pool quality (local cache file; inject uses live proxyPools)
+    pfc = int(report.get("proxy_file_count") or 0)
+    if pfc <= 0:
+        issues_hard.append("proxy_file_empty")
+    elif pfc < 3:
+        issues_soft.append("proxy_pool_low")
+    report["proxy_soft_skip"] = {
+        "skip_keys": proxy_skip_n,
+        "disabled": proxy_disabled_n,
+    }
+    if proxy_skip_n > 0 and pfc > 0 and proxy_skip_n >= max(1, pfc // 2):
+        issues_soft.append("proxy_many_soft_skipped")
+    issues = issues_hard + issues_soft
     report["issues"] = issues
+    report["issues_hard"] = issues_hard
+    report["issues_soft"] = issues_soft
     report["healthy"] = len(issues) == 0
+    # exit: 0 ok | 2 soft-only | 3 hard (alert path)
+    if issues_hard:
+        exit_code = 3
+    elif issues_soft:
+        exit_code = 2
+    else:
+        exit_code = 0
+    report["exit_code"] = exit_code
 
     if WANT_JSON:
         print(json.dumps(report, indent=2))
-        return 0 if report["healthy"] else 2
+        return exit_code
 
     a = report["accounts"]
     print(f"=== Grok Farm Health @ {report['ts']} ===")
@@ -501,9 +540,12 @@ def main() -> int:
             f"  [{r['id']}] {r['email']:45s} {r['status']:10s} "
             f"tok={r.get('token_health') or '-'} ({r['batch_id']})"
         )
-    if issues:
-        print("ISSUES:", ", ".join(issues))
-        return 2
+    if issues_hard or issues_soft:
+        if issues_hard:
+            print("ISSUES_HARD:", ", ".join(issues_hard))
+        if issues_soft:
+            print("ISSUES_SOFT:", ", ".join(issues_soft))
+        return exit_code
     print("OK healthy")
     return 0
 
