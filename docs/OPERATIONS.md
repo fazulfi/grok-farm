@@ -65,7 +65,14 @@ sqlite3 /var/lib/9router/db/data.sqlite \
 ```bash
 python3 check_status.py
 python3 check_status.py --json
-# Live probe sample (soft meta; default injected only)
+# Soft inventory probe line: needs_relogin count + last_probe_status breakdown
+# (soft policy: meta only; does not flip injected→error)
+
+# Large soft probe batch (default soft; no --mark-error)
+python3 probe_tokens.py --limit 200
+python3 probe_tokens.py --limit 200 --json
+
+# Smaller sample / dry-run
 python3 check_status.py --probe --probe-limit 20
 python3 probe_tokens.py --limit 50
 python3 probe_tokens.py --dry-run --limit 5
@@ -80,6 +87,7 @@ python3 mark_expired_tokens.py
 
 # Gateway vs DB inventory (no tokens printed)
 python3 reconcile_9router.py
+python3 reconcile_9router.py --json
 python3 reconcile_9router.py --json --limit-print 5
 
 # Adaptive concurrent decision for next farm batch
@@ -87,7 +95,14 @@ python3 adaptive_concurrent.py --print
 python3 adaptive_concurrent.py --json
 ```
 
-See RUNBOOK **R10** (expired JWT), **R13** (probe), **R14** (reconcile), **R15** (adaptive concurrent).
+**Soft inventory (probe) dashboard:** `check_status.py` prints
+`probe: needs_relogin=N last_status={...}` and may list soft issue `needs_relogin`
+(exit 2). Use `probe_tokens.py --limit 200 --json` for batch counts by `alive` /
+`needs_relogin` / `jwt_expired` / network. Soft policy = write `last_probe_*` +
+`needs_relogin` only; never `status=error` unless explicit `--mark-error`.
+
+See RUNBOOK **R10** (expired JWT), **R13** (probe, large batch), **R14**
+(reconcile), **R15** (adaptive concurrent).
 
 ### 2.2 Expected steady state
 

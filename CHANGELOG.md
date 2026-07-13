@@ -5,8 +5,40 @@ All notable changes to Grok Farm are documented here.
 ## [Unreleased]
 
 ### Planned
-- Re-farm / re-auth automation for `status=error` + `notes=token_expired` / `needs_relogin` (browser path optional)
+
+- Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
+  `needs_relogin` (browser path optional)
 - Optional health-check systemd timer → webhook when `GROK_ALERT_WEBHOOK` set
+
+## [2.2.2] — 2026-07-13
+
+### Added
+
+- **Large soft probe batch** (`probe_accounts` / `probe_tokens.py`): unprobed-first
+  resume order, `--delay` / `GROK_PROBE_DELAY`, progress every N, periodic commit
+  (`GROK_PROBE_COMMIT_EVERY`), `--quiet` / `--id-order`
+- **`check_status` soft_policy dashboard**: JWT offline % + live probe coverage %,
+  needs_relogin %, alive % of probed (meta only; no status flip)
+- `.env.example`: `GROK_PROBE_DELAY`, `GROK_PROBE_PROGRESS_EVERY`, `GROK_PROBE_COMMIT_EVERY`
+
+### Changed
+
+- Operator P0 health commands (soft inventory; no default `--mark-error`):
+
+  ```bash
+  python3 probe_tokens.py --limit 200
+  python3 probe_tokens.py --limit 200 --json
+  python3 check_status.py
+  python3 reconcile_9router.py
+  python3 reconcile_9router.py --json
+  ```
+
+- RUNBOOK **R13** / OPERATIONS: large soft probe + soft_policy dashboard notes
+
+### Security
+
+- Soft probe still never flips `injected`→`error` unless explicit `--mark-error`
+- Progress/logs never print JWT or Bearer tokens
 
 ## [2.2.1] — 2026-07-13
 

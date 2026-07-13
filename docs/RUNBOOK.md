@@ -309,18 +309,43 @@ If age is not on PATH, decrypt on Linux/VPS that has the vaulted identity.
 
 ## R13 — Live token probe / `needs_relogin` inventory
 
-**Goal:** Know which injected JWTs still work against xAI **without** full browser re-auth.
+**Goal:** Know which injected JWTs still work against xAI **without**
+full browser re-auth.
 
-**Endpoint:** `GET https://api.x.ai/v1/models` with `Authorization: Bearer <access_token>` (stdlib only).
+**Endpoint:** `GET https://api.x.ai/v1/models` with
+`Authorization: Bearer <access_token>` (stdlib only).
+
+**Default policy is soft:** write `last_probe_*` + `needs_relogin` meta only.
+Do **not** pass `--mark-error` unless you have a re-auth plan.
+
+### Large-batch soft probe (P0)
+
+Use a capped soft run against injected inventory. Selection order is stable
+(`ORDER BY id ASC`). Re-running the same `--limit` re-probes the same head of
+the queue (raise limit when you need a wider sample).
 
 ```bash
 cd ~/grok-farm
-# Soft inventory (default): write last_probe_* + needs_relogin; do NOT status=error
+# Soft large batch (default: NO --mark-error)
+python3 probe_tokens.py --limit 200
+python3 probe_tokens.py --limit 200 --json
+
+# Health surface after probe (soft_policy / inventory dashboard)
+python3 check_status.py
+# Expect: probe: needs_relogin=N last_status={alive:…, needs_relogin:…, …}
+
+# Gateway vs farm diff (no tokens)
+python3 reconcile_9router.py --json
+```
+
+Smaller samples / dry-run:
+
+```bash
 python3 probe_tokens.py --limit 50
 python3 probe_tokens.py --json --limit 20
 python3 probe_tokens.py --dry-run --limit 5   # no DB writes
 
-# Via health CLI
+# Via health CLI (sample probe, soft mark_error=False)
 python3 check_status.py --probe --probe-limit 20
 python3 check_status.py --json | jq '.probe, .probe_run, .issues'
 
@@ -329,23 +354,37 @@ python3 probe_tokens.py --mark-error --limit 10
 ```
 
 | Flag / env | Default | Effect |
-|------------|---------|--------|
+| --- | --- | --- |
 | `--dry-run` | off | Probe only, no meta write |
-| `--limit N` | all matching | Cap work / rate |
+| `--limit N` | all matching | Cap work (use 200 for large soft batch) |
 | `--include-farmed` | off | Also probe `status=farmed` |
 | `--no-skip-expired` | off | Force HTTP even if offline JWT expired |
 | `--mark-error` | **off** | Hard `status=error` on `needs_relogin` |
-| `GROK_PROBE_SKIP_EXPIRED` | `1` | Short-circuit expired JWT → `jwt_expired` |
+| `GROK_PROBE_SKIP_EXPIRED` | `1` | Offline exp → `jwt_expired` (no HTTP) |
 | `GROK_PROBE_TIMEOUT` | ~15s | HTTP timeout |
 | `GROK_PROBE_LIMIT` | 20 | Default for `check_status --probe` |
+| `GROK_PROBE_DELAY` | `0.15` | Reserved in `.env.example` (not wired yet) |
 
-**Interpretation:**
+### Inventory interpretation
 
-- `needs_relogin=1` → soft issue on `check_status` (exit 2). Account still `injected`; gateway connection may still exist.
-- `jwt_expired` offline ≠ ban; Discord FYI: re-login, not “coid”.
-- Full browser re-auth is **out of scope** for v2.2.0 — use inventory to decide later.
+- **`needs_relogin`:** live HTTP rejected token. Soft issue (exit 2).
+  Stays `injected`. No mass `--mark-error`.
+- **`jwt_expired` (offline):** JWT `exp` past; skip HTTP if skip-expired.
+  Age signal only, not ban. Not live relogin.
+- **`alive`:** live probe OK. Clears `needs_relogin` when meta written.
+- **`network_error` / rate / spend:** transient or quota.
+  Does not clear `needs_relogin`; re-run later.
 
-**Do not:** mass `--mark-error` on injected without a re-auth plan (loses inject queue semantics).
+**Notes:**
+
+- Offline `jwt_expired` ≠ ban; Discord FYI: re-login inventory, not “coid”.
+- Soft policy keeps gateway inject IDs; hard `--mark-error` only when operator
+  accepts losing inject-queue semantics for those rows.
+- Full browser re-auth is **out of scope** for v2.2.x — use inventory later.
+- After large soft probe: `python3 reconcile_9router.py --json`
+  (bucket `needs_relogin_db`).
+
+**Do not:** mass `--mark-error` on injected without a re-auth plan.
 
 ---
 
