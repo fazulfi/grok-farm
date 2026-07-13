@@ -125,15 +125,28 @@ sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farm-backup.service > /etc/systemd/system/grok-farm-backup.service
 sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farm-health.service > /etc/systemd/system/grok-farm-health.service
+sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+  systemd/grok-farm-probe.service > /etc/systemd/system/grok-farm-probe.service
+sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+  systemd/grok-farm-reconcile.service > /etc/systemd/system/grok-farm-reconcile.service
+sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+  systemd/grok-farm-mark-expired.service > /etc/systemd/system/grok-farm-mark-expired.service
 cp systemd/grok-farm-backup.timer /etc/systemd/system/
 cp systemd/grok-farm-health.timer /etc/systemd/system/
+cp systemd/grok-farm-probe.timer /etc/systemd/system/
+cp systemd/grok-farm-reconcile.timer /etc/systemd/system/
+cp systemd/grok-farm-mark-expired.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now grok-farm-backup.timer
 systemctl enable --now grok-farm-health.timer
+systemctl enable --now grok-farm-probe.timer
+systemctl enable --now grok-farm-reconcile.timer
+systemctl enable --now grok-farm-mark-expired.timer
 # Do NOT start farmer until .env + proxies ready
 ```
 
-`deploy_farm_vps.sh` installs farmer + backup + health units the same way (farmer **not** restarted).
+`deploy_farm_vps.sh` installs farmer + backup + health + probe + reconcile +
+mark-expired units the same way (farmer **not** restarted).
 
 ### 2.6 One-shot test (before unlimited loop)
 
@@ -237,18 +250,25 @@ Identity (decrypt): laptop + optional `/root/.config/grok-farm/age.identity` (60
 
 ---
 
-## 6b. Health timer units
+## 6b. Health + soft observability timer units
 
 | Unit | Schedule | Action |
 |------|----------|--------|
 | `grok-farm-health.service` | oneshot | `scripts/health_check.sh` → `check_status.py --json` (no probe/mark-error) |
 | `grok-farm-health.timer` | `*:0/15` + ≤2m random delay | enable with `systemctl enable --now grok-farm-health.timer` |
+| `grok-farm-probe.service` | oneshot | `scripts/probe_soft.sh` (soft; no `--mark-error`) |
+| `grok-farm-probe.timer` | every 6h + random delay | soft inventory probe |
+| `grok-farm-reconcile.service` | oneshot | `scripts/reconcile_soft.sh` |
+| `grok-farm-reconcile.timer` | every 12h + random delay | gateway vs DB report |
+| `grok-farm-mark-expired.service` | oneshot | `scripts/mark_expired_farmed.sh` (farmed only) |
+| `grok-farm-mark-expired.timer` | `*:0/30` + ≤3m random | dead farmed JWT → error |
 
-- Log: `~/grok-farm/logs/health_check.log`
-- Webhook on exit 2 when `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` set (optional)
+- Health log: `~/grok-farm/logs/health_check.log`
+- Health webhook on exit **3** (hard) when `GROK_ALERT_WEBHOOK` set; exit **2** soft = log-only; `SuccessExitStatus=2 3`
+- Alert debounce: `GROK_ALERT_DEBOUNCE_MIN` (default 60)
 - Does **not** restart or stop `grok-farmer`
 
-Manual oneshot: `sudo systemctl start grok-farm-health.service`
+Manual oneshot: `sudo systemctl start grok-farm-health.service` (or probe/reconcile/mark-expired)
 
 ---
 
@@ -261,8 +281,11 @@ Manual oneshot: `sudo systemctl start grok-farm-health.service`
 - [ ] `workflow.log` / `farm_brutal.log` owned by farmer
 - [ ] `grep 'Brutal Farmer v5' farm_brutal.log`
 - [ ] `python3 sync_proxies_from_9r.py` → count > 0
-- [ ] `python3 check_status.py` — identity pool, proxies, backup status
+- [ ] `python3 check_status.py` — hard/soft issues, proxies, backup status
 - [ ] `systemctl is-active grok-farm-health.timer` → **active**
+- [ ] `systemctl is-active grok-farm-probe.timer` → **active**
+- [ ] `systemctl is-active grok-farm-reconcile.timer` → **active**
+- [ ] `systemctl is-active grok-farm-mark-expired.timer` → **active**
 - [ ] `bash scripts/health_check.sh` or oneshot unit; log in `logs/health_check.log`
 - [ ] Mid-drain or post-batch `SUMMARY N ok 0 fail`
 - [ ] 9router grok-cli connections grow

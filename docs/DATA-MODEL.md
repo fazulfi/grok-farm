@@ -52,18 +52,26 @@ Probe columns are additive via `token_util.ensure_probe_columns` (called from `d
 
 ### Table `proxy_stats`
 
-Tracks inject outcomes per proxy host (credentials stripped from key).
+Tracks inject outcomes per proxy host (credentials stripped from key). Soft-evict
+mirrors `domain_stats` (local skip only; **never** auto-DELETE gateway `proxyPools`).
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `proxy_key` | TEXT PK | Scheme + host:port (no user:pass) |
 | `success_count` | INTEGER | Successful injects |
 | `fail_count` | INTEGER | Failed injects |
+| `consecutive_fails` | INTEGER | Reset to 0 on success; used for soft-skip |
 | `last_success_at` | TIMESTAMP | Last success |
 | `last_fail_at` | TIMESTAMP | Last fail |
 | `last_email` | TEXT | Last related account email |
 | `score` | REAL | `success / (success+fail)` in \[0,1\] |
+| `disabled` | INTEGER | Manual disable flag (0/1); success clears auto path |
 | `updated_at` | TIMESTAMP | Last update |
+
+**Soft-skip rule:** `proxies_to_skip()` excludes proxies with `disabled=1` **or**
+`consecutive_fails >= GROK_PROXY_MAX_CONSECUTIVE_FAILS` (default **5**). Inject
+`workflow.pick_proxy()` score-weights the remainder; if all would be skipped, pick
+**fails open** to the full live list. Empty live proxyPools still **fail-closed**.
 
 ### Table `domain_stats`
 
