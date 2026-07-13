@@ -15,6 +15,14 @@ All notable changes to Grok Farm are documented here.
   refreshed, **not** restarted)
 - Docs: OPERATIONS §1/§2.1/§10, DEPLOYMENT §2.5/§6b, SECURITY Alerts, RUNBOOK **R17**
 
+### Changed
+
+- **Docs product-scope reframe:** Grok Farm = **autofarm + auto-inject only**,
+  not a session lifecycle manager. README / AGENTS / ARCHITECTURE non-goals /
+  DATA-MODEL pipeline marks / OPERATIONS steady state / RUNBOOK R10–R13 /
+  SECURITY soft meta / INTEGRATION-9ROUTER re-inject wording / docs index —
+  capacity recovery = re-farm + inject; soft probe/JWT = observability noise
+
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
