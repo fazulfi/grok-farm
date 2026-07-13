@@ -42,6 +42,7 @@ sudo systemctl enable --now grok-farmer
 
 | Doc | Description |
 |-----|-------------|
+| [AGENTS.md](./AGENTS.md) | Agent operating contract (workflow, safety, DoD) |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design |
 | [docs/OPERATIONS.md](./docs/OPERATIONS.md) | Day-2 ops |
 | [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Fresh install |

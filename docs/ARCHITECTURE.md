@@ -33,8 +33,8 @@ Grok Farm is a **production account-farming pipeline** for xAI Grok CLI OAuth cr
 |------|----------------|------|-------------|
 | Farmer | CSA VPS `152.42.242.192` | `magadirxwin` (non-root) | `~/grok-farm` |
 | Gateway | 9router `49.12.82.34:39999` | `root` SSH | HTTP `20128` |
-| OTP inbox | Gmail | App password | IMAP `993` |
-| Domain | e.g. `budgezen.com` | Cloudflare Email Routing | catch-all |
+| OTP inbox | Gmail (1..N) | App password | IMAP `993` |
+| Domain pool | e.g. `budgezen.com`, `mypapyr.com` | Cloudflare Email Routing | catch-all → IMAP |
 
 **Hard constraint:** Camoufox must **not** run as root (XPCOM incomplete under root cache).
 
@@ -44,10 +44,33 @@ Grok Farm is a **production account-farming pipeline** for xAI Grok CLI OAuth cr
 
 ### 3.1 Core farmer (`farm.py`)
 
-- Generates unique emails (`domain` or `plus_trick`)
+- Generates unique emails (`domain` multi-pool or `plus_trick`) via `email_identity.py`
 - Launches Camoufox (Playwright) with optional proxy
-- Signup → OTP (IMAP) → profile → Turnstile → OAuth PKCE
+- Signup → OTP (IMAP, resolved per domain) → profile → Turnstile → OAuth PKCE
 - Writes per-batch `accounts.txt` / `accounts.json` / `farm.log`
+
+### 3.1b Identity plane (`email_identity.py`)
+
+```
+GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com
+        │
+        ▼
+  IdentityPool.pick_domain()  ── random | round_robin
+        │
+        ▼
+  local@domain  ──►  imap_for_email()  ──►  IMAP OTP poll
+```
+
+| Config | Role |
+|--------|------|
+| `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred) |
+| `GROK_EMAIL_DOMAIN` | Legacy single domain (merged into pool) |
+| `GROK_EMAIL_DOMAIN_STRATEGY` | `random` (default) or `round_robin` |
+| `GROK_IMAP_*` | Default inbox shared by all domains |
+| `GROK_IDENTITY_FILE` / `identities.json` | Optional multi-IMAP: domain → Gmail map |
+
+**Pattern A (recommended start):** multi domain → one Gmail.  
+**Pattern B:** multi domain + multi Gmail pairs via `identities.json`.
 
 ### 3.2 Orchestration (`brutal_farmer.sh` + systemd)
 
@@ -121,7 +144,9 @@ email generate
 |-------|--------|
 | `CONCURRENT` | Parallel browsers (RAM-bound) |
 | `ACCOUNTS_PER_BATCH` | Throughput per loop |
-| Multi-VPS farmers | Horizontal; shared domain/IMAP bottleneck |
+| Multi-VPS farmers | Horizontal; serialize inject to 9router |
+| Multi-domain pool | Spread domain reputation / burn risk |
+| Multi-IMAP identities | OTP capacity + inbox isolation |
 | Proxy pool size | IP diversity vs Turnstile/geo |
 
 See [CAPACITY.md](./CAPACITY.md).

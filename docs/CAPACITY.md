@@ -80,11 +80,22 @@ VPS-F3 ──┘
 
 **Bottlenecks:**
 
-- Single Gmail IMAP inbox
-- Catch-all provider limits
+- Single Gmail IMAP inbox (mitigate: multi domain first, then multi Gmail via `identities.json`)
+- Catch-all provider limits / domain reputation burn
 - 9router SQLite write contention (serialize injects or use one injector)
 
 **Pattern:** one inject coordinator OR staggered batch times.
+
+### 6.1 Identity scale path
+
+| Stage | Config | When |
+|-------|--------|------|
+| 0 | 1 domain + 1 Gmail | Bootstrap |
+| 1 | **N domains + 1 Gmail** | Domain burn / diversity (recommended) |
+| 2 | N domains + M Gmail pairs | IMAP rate / isolation |
+| 3 | Multi-VPS × stage 1–2 | Throughput; inject serialized |
+
+Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 
 ---
 

@@ -2,6 +2,51 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [Unreleased]
+
+### Planned
+- Expired JWT re-farm / re-auth policy automation
+- Multi-Gmail Pattern B production rollout (`identities.json`)
+- S3 retention policy automation beyond one-shot plaintext cleanup
+
+## [2.1.0] — 2026-07-13
+
+### Added
+- `AGENTS.md` agent operating contract: authority order, live-safe VPS ops, security S1–S10, hardening backlog, docs-sync matrix
+- Super-autopilot workflow mandates (blocking): **unlimited sub-agents**, **unlimited todos**, **wajib spek enterprise** (§6.1–§6.3)
+- Enterprise hardening modules: `log_redact.py`, `token_util.py`, `alerts.py`, `db_schema.py`
+- `proxy_stats` table + inject success/fail scoring
+- Account columns `token_exp`, `token_health` (JWT exp classification)
+- Expanded `check_status.py` health CLI (farmer, disk, proxies, backup age, tokens, proxy scores, domain pool, `--json`)
+- Optional `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` Discord-style alerts
+- S3 backup encryption with `age` (`scripts/s3_backup.sh`, `scripts/s3_upload.py`); restore decrypt path
+- Optional age encryption for `scripts/backup_farm.sh` / `scripts/restore_farm.sh`
+- **Multi-domain / multi-IMAP identity plane** (`email_identity.py`): `GROK_EMAIL_DOMAINS`, domain strategy, optional `identities.json`
+- `identities.example.json` template; health CLI domain pool + inventory counts
+- Docs workflow: multi-domain enable, verify, multi-Gmail Pattern B (OPERATIONS/ARCHITECTURE/CAPACITY/RUNBOOK)
+- **`domain_stats` table** + OTP/farm success-fail scoring; auto-skip dead catch-all domains (`GROK_DOMAIN_MAX_CONSECUTIVE_FAILS`, default 3)
+- Health CLI `domain_stats:` section; RUNBOOK **R3c** (catch-all OTP probe) + **R3d** re-enable procedure
+- age identity vault guidance without USB (password manager / second host / encrypted local copy)
+
+### Changed
+- Definition of Done / anti-patterns require enterprise-spec compliance and forbid artificial agent/todo caps
+- `import_db.py` / `workflow.py` use shared migrate, redaction, token health skip for expired tokens
+- `farm.py` email generation + IMAP OTP use identity pool (per-domain IMAP)
+- Docs: SECURITY, DATA-MODEL, OPERATIONS, `.env.example` for hardening + multi-domain surface
+- `workflow.py`: commit inject marks **before** proxy_stats updates (prevents gateway/DB desync on scoring errors)
+- `db_schema.record_proxy_result`: accept `sqlite3.Row` **or** plain tuple
+- `check_status.py`: hard issue only for `farmed_expired_tokens`; historical injected JWT age → soft `many_expired_tokens`
+- `email_identity.pick_domain` **round_robin**: strict A→B→A→B among healthy candidates (thread-safe); default multi-domain strategy recommendation = `round_robin`
+- `workflow.py`: single DB connection + Row factory for farmed scan; mark `bad_token`/`token_expired` as `error` without reopen thrash; inject UPDATE only `status='farmed'`; fail if remote inject exits non-zero with empty stdout
+- Offsite backup default: encrypted `.tgz.age` only (plaintext historical S3 objects cleaned on release)
+
+### Security
+- Offsite backups encrypt-before-upload (default `BACKUP_ENCRYPT=age`)
+- `akun.db` hardened to mode 600 on import/migrate
+- Log/webhook redaction for JWT and proxy credentials
+- Document least-privilege sudo (revoke `NOPASSWD:ALL` for farmer user)
+- age private key must not live only on the farm VPS; operator vault required for restore
+
 ## [2.0.0] — 2026-07-12
 
 ### Added

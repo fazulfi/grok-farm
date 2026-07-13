@@ -10,8 +10,8 @@
 |------|--------|
 | Ubuntu 22.04/24.04 VPS | 4 vCPU / 8 GB RAM recommended |
 | Non-root sudo user | e.g. `magadirxwin` — **never run Camoufox as root** |
-| Domain catch-all | Cloudflare Email Routing → Gmail |
-| Gmail App Password | IMAP OTP |
+| Domain catch-all (1..N) | Cloudflare Email Routing → Gmail per domain |
+| Gmail App Password | IMAP OTP (shared or per-identity) |
 | Residential proxies | Prefer non-EU for Grok 4.5 |
 | Optional 9router | Gateway for inject + proxyPools |
 
@@ -34,7 +34,9 @@ chmod +x install.sh run.sh brutal_farmer.sh scripts/*.sh ops/*.py 2>/dev/null ||
 ./install.sh
 
 cp .env.example .env
-nano .env   # IMAP, domain, password, headless=true on VPS
+nano .env   # IMAP, GROK_EMAIL_DOMAINS=domain1,domain2, password, headless=true on VPS
+# Optional multi-IMAP:
+# cp identities.example.json identities.json && chmod 600 identities.json
 ```
 
 ### Swap (recommended)

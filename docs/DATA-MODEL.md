@@ -4,7 +4,10 @@
 
 ## 1. Farm SQLite — `akun.db`
 
-Path: `~/grok-farm/akun.db`
+Path: `~/grok-farm/akun.db` (override: `GROK_AKUN_DB`)  
+Permissions: owner farmer user, mode **600** (`db_schema.harden_db_file`).
+
+Schema migrations are additive via `db_schema.migrate()` (import/workflow/health).
 
 ### Table `accounts`
 
@@ -22,18 +25,56 @@ Path: `~/grok-farm/akun.db`
 | `injected_at` | TIMESTAMP | When marked injected |
 | `grok_cli_connection_id` | TEXT | Optional 9router id |
 | `ninerouter_name` | TEXT | Optional display name |
-| `notes` | TEXT | Freeform |
+| `notes` | TEXT | Freeform (e.g. `token_expired`) |
+| `token_exp` | INTEGER | JWT `exp` unix seconds (nullable) |
+| `token_health` | TEXT | `ok` \| `expiring_soon` \| `expired` \| `invalid` \| `missing` |
+
+### Table `proxy_stats`
+
+Tracks inject outcomes per proxy host (credentials stripped from key).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `proxy_key` | TEXT PK | Scheme + host:port (no user:pass) |
+| `success_count` | INTEGER | Successful injects |
+| `fail_count` | INTEGER | Failed injects |
+| `last_success_at` | TIMESTAMP | Last success |
+| `last_fail_at` | TIMESTAMP | Last fail |
+| `last_email` | TEXT | Last related account email |
+| `score` | REAL | `success / (success+fail)` in \[0,1\] |
+| `updated_at` | TIMESTAMP | Last update |
+
+### Table `domain_stats`
+
+Tracks farm/OTP outcomes per catch-all domain so multi-domain pools can auto-skip dead routing.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `domain` | TEXT PK | Lowercase domain (no `@`) |
+| `success_count` | INTEGER | Successful farm completions |
+| `fail_count` | INTEGER | Failed farm attempts (incl. OTP timeout) |
+| `consecutive_fails` | INTEGER | Reset to 0 on success; used for auto-skip |
+| `last_success_at` | TIMESTAMP | Last success |
+| `last_fail_at` | TIMESTAMP | Last fail |
+| `last_email` | TEXT | Last related account email |
+| `score` | REAL | `success / (success+fail)` in \[0,1\] |
+| `disabled` | INTEGER | Manual disable flag (0/1); success clears auto path |
+| `updated_at` | TIMESTAMP | Last update |
+
+**Auto-skip rule:** domain is skipped by `IDENTITY_POOL.pick_domain` when `disabled=1` **or** `consecutive_fails >= GROK_DOMAIN_MAX_CONSECUTIVE_FAILS` (default **3**). If all pool domains would be skipped, pick fails open to the full pool so farming does not hard-stop.
 
 ### Indexes
 
-- `idx_status` on `status`
-- `idx_email` on `email`
+- `idx_status` on `accounts(status)`
+- `idx_email` on `accounts(email)`
+- `idx_proxy_score` on `proxy_stats(score DESC)`
+- `idx_domain_score` on `domain_stats(score DESC)`
 
 ### State machine
 
 ```
 (missing) --import--> farmed --workflow success--> injected
-                \-- manual mark --> error
+                 \-- token expired / inject fail --> error
 ```
 
 ---
@@ -134,14 +175,30 @@ See `.env.example`. Critical keys:
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| GROK_IMAP_* | yes | OTP inbox |
+| GROK_IMAP_* | yes (or identities file) | Default OTP inbox |
 | GROK_EMAIL_MODE | yes | `domain` / `plus_trick` |
-| GROK_EMAIL_DOMAIN | if domain | catch-all domain |
+| GROK_EMAIL_DOMAINS | preferred if domain | Comma-separated catch-all domains |
+| GROK_EMAIL_DOMAIN | legacy | Single domain; merged into pool |
+| GROK_EMAIL_DOMAIN_STRATEGY | ops | `random` \| `round_robin` |
+| GROK_IDENTITY_FILE | optional | Path to multi-IMAP JSON map |
 | GROK_PASSWORD | yes | account password |
 | GROK_PROXY_FILE | prod | path to synced proxy list |
 | GROK_CONCURRENT | ops | browsers |
 | GROK_MAX_ACCOUNTS | ops | batch size default |
 | GROK_HEADLESS | ops | `true` on VPS |
+| GROK_AKUN_DB | ops | override path to `akun.db` |
+| GROK_FARM_DIR | ops | override farm home for health CLI |
+| GROK_ALERT_WEBHOOK | optional | Discord-style webhook for ops alerts |
+| GROK_9R_SSH / GROK_9R_PORT / GROK_9R_KEY | ops | 9router SSH inject path |
+
+Backup-only (`~/.config/grok-farm/backup.env`, not in git):
+
+| Key | Description |
+|-----|-------------|
+| AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY | S3 credentials |
+| S3_ENDPOINT / S3_BUCKET / S3_PREFIX | Object storage |
+| AGE_RECIPIENT | age public key (`age1...`) |
+| BACKUP_ENCRYPT | `age` (default) or `none` (emergency) |
 
 ---
 
@@ -150,8 +207,9 @@ See `.env.example`. Critical keys:
 | Path | Content |
 |------|---------|
 | `farm_brutal.log` | systemd / loop stdout (if configured) |
-| `workflow.log` | import + inject |
+| `workflow.log` | import + inject (redacted secrets) |
 | `batch_*/farm.log` | per-batch farmer detail |
+| `logs/s3_backup.log` | hourly backup log (health CLI reads age) |
 | `screenshots/` | failure diagnostics |
 
 ---
@@ -160,4 +218,5 @@ See `.env.example`. Critical keys:
 
 - Emails, tokens, passwords = **credentials**
 - Do not commit `akun.db`, `.env`, `results/**`
-- Production backup encryption recommended (age/sops/gpg)
+- Production backup encryption required (`age` → `.tgz.age` on S3)
+- Retention default: 14 days (`RETENTION_DAYS` in backup.env)
