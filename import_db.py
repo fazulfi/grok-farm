@@ -34,22 +34,40 @@ def main() -> int:
             rt = parts[3] if len(parts) > 3 else ""
             exp = jwt_exp_unix(at)
             health = token_health(at)
+            # Fail-closed: dead tokens never enter inject queue as farmed
+            if not at or not str(at).startswith("eyJ") or health in ("expired", "invalid", "missing"):
+                status = "error"
+                notes = "token_expired" if health == "expired" else "bad_token"
+            else:
+                status = "farmed"
+                notes = None
             try:
                 conn.execute(
                     """INSERT INTO accounts
-                       (email,password,access_token,refresh_token,batch_id,status,token_exp,token_health)
-                       VALUES (?,?,?,?,?,?,?,?)""",
-                    (email, password, at, rt, batch_id, "farmed", exp, health),
+                       (email,password,access_token,refresh_token,batch_id,status,token_exp,token_health,notes)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (email, password, at, rt, batch_id, status, exp, health, notes),
                 )
                 imported += 1
             except sqlite3.IntegrityError:
                 # refresh token meta for existing farmed rows if empty
                 row = conn.execute(
-                    "SELECT access_token, token_exp FROM accounts WHERE email=?",
+                    "SELECT access_token, token_exp, status FROM accounts WHERE email=?",
                     (email,),
                 ).fetchone()
                 if row is not None and at and (not row["token_exp"]):
                     update_account_token_meta(conn, email, at)
+                if (
+                    row is not None
+                    and row["status"] == "farmed"
+                    and health in ("expired", "invalid", "missing")
+                ):
+                    note = "token_expired" if health == "expired" else "bad_token"
+                    conn.execute(
+                        "UPDATE accounts SET status='error', notes=?, token_exp=?, token_health=? "
+                        "WHERE email=? AND status='farmed'",
+                        (note, exp, health, email),
+                    )
 
     conn.commit()
     total = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]

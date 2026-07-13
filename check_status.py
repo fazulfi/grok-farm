@@ -15,13 +15,20 @@ from pathlib import Path
 from db_schema import DEFAULT_DB, migrate
 from email_identity import domain_counts_from_emails, load_identity_pool
 from log_redact import redact_proxy_url
-from token_util import ensure_token_columns, token_health, update_account_token_meta
+from token_util import (
+    ensure_token_columns,
+    mark_expired_accounts,
+    token_health,
+    update_account_token_meta,
+)
 
 FARM = Path(os.path.expanduser(os.environ.get("GROK_FARM_DIR") or "~/grok-farm"))
 DB = Path(os.path.expanduser(os.environ.get("GROK_AKUN_DB") or str(FARM / "akun.db")))
 PROXY_FILE = FARM / "usa_proxies.txt"
 BACKUP_LOG = FARM / "logs" / "s3_backup.log"
 WANT_JSON = "--json" in sys.argv
+MARK_EXPIRED = "--mark-expired" in sys.argv
+MARK_EXPIRED_INJECTED = "--mark-expired-injected" in sys.argv
 
 
 def identity_report() -> dict:
@@ -164,6 +171,22 @@ def main() -> int:
     }
     token_counts = refresh_token_health(conn)
 
+    mark_stats = None
+    if MARK_EXPIRED or MARK_EXPIRED_INJECTED:
+        mark_stats = mark_expired_accounts(
+            conn,
+            include_injected=MARK_EXPIRED_INJECTED,
+            dry_run=False,
+        )
+        # re-count statuses after marks
+        by_status = {
+            r[0]: r[1]
+            for r in conn.execute(
+                "SELECT status, COUNT(*) FROM accounts GROUP BY status"
+            ).fetchall()
+        }
+        token_counts = refresh_token_health(conn)
+
     top_proxies = []
     try:
         for r in conn.execute(
@@ -244,6 +267,8 @@ def main() -> int:
     report["domains_inventory"] = inv_domains
     report["domains_not_in_pool"] = inventory_only
     report["farmed_expired"] = int(farmed_expired or 0)
+    if mark_stats is not None:
+        report["mark_expired"] = mark_stats
 
     # overall health flag
     issues = []
@@ -280,6 +305,12 @@ def main() -> int:
         f"farmed={a['farmed']} error={a['error']}"
     )
     print(f"tokens:     {token_counts}")
+    if mark_stats is not None:
+        print(
+            f"mark_exp:   marked_error={mark_stats.get('marked_error')} "
+            f"farmed_dead={mark_stats.get('farmed_expired')} "
+            f"injected_expired={mark_stats.get('injected_expired')}"
+        )
     print(f"proxies:    file_lines={report['proxy_file_count']}")
     idn = report.get("identity") or {}
     if idn.get("error"):

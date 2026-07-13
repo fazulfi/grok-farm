@@ -80,3 +80,81 @@ def update_account_token_meta(conn, email: str, access_token: str, warn_seconds:
         (exp, health, email),
     )
     return health
+
+
+def mark_expired_accounts(
+    conn,
+    *,
+    include_injected: bool = False,
+    dry_run: bool = False,
+    warn_seconds: int = 3600,
+) -> dict[str, int]:
+    """
+    Refresh JWT meta and mark dead tokens as status=error.
+
+    Policy (enterprise):
+      - Always: farmed + expired/invalid/missing → status=error, notes=token_expired|bad_token
+      - Optional include_injected: injected + expired → status=error (inventory cleanup;
+        does not revoke 9router connections — operator re-farm / re-auth separately)
+
+    Returns counts: scanned, updated_meta, marked_error, farmed_expired, injected_expired, dry_run.
+    """
+    ensure_token_columns(conn)
+    rows = conn.execute(
+        """SELECT email, access_token, status FROM accounts
+           WHERE status IN ('farmed', 'injected')"""
+    ).fetchall()
+    stats = {
+        "scanned": 0,
+        "updated_meta": 0,
+        "marked_error": 0,
+        "farmed_expired": 0,
+        "injected_expired": 0,
+        "dry_run": 1 if dry_run else 0,
+    }
+    for row in rows:
+        if hasattr(row, "keys"):
+            email, at, status = row["email"], row["access_token"] or "", row["status"]
+        else:
+            email, at, status = row[0], row[1] or "", row[2]
+        stats["scanned"] += 1
+        health = token_health(at, warn_seconds=warn_seconds)
+        exp = jwt_exp_unix(at)
+        if not dry_run:
+            conn.execute(
+                "UPDATE accounts SET token_exp=?, token_health=? WHERE email=?",
+                (exp, health, email),
+            )
+            stats["updated_meta"] += 1
+
+        note = None
+        if not at or not str(at).startswith("eyJ") or health == "invalid":
+            note = "bad_token"
+        elif health == "expired":
+            note = "token_expired"
+        else:
+            continue
+
+        if status == "farmed":
+            stats["farmed_expired"] += 1
+            if not dry_run:
+                conn.execute(
+                    "UPDATE accounts SET status='error', notes=? WHERE email=? AND status='farmed'",
+                    (note, email),
+                )
+                stats["marked_error"] += 1
+        elif status == "injected" and include_injected and note == "token_expired":
+            stats["injected_expired"] += 1
+            if not dry_run:
+                conn.execute(
+                    "UPDATE accounts SET status='error', notes=? WHERE email=? AND status='injected'",
+                    (note, email),
+                )
+                stats["marked_error"] += 1
+        elif status == "injected" and note == "token_expired":
+            stats["injected_expired"] += 1
+            # meta only unless include_injected
+
+    if not dry_run:
+        conn.commit()
+    return stats

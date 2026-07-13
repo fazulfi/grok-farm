@@ -56,19 +56,31 @@ def import_batches() -> int:
 
                 exp = jwt_exp_unix(at)
                 health = token_health(at)
+                # Fail-closed: dead tokens never enter inject queue as farmed
+                if (
+                    not at
+                    or not str(at).startswith("eyJ")
+                    or health in ("expired", "invalid", "missing")
+                ):
+                    status = "error"
+                    notes = "token_expired" if health == "expired" else "bad_token"
+                else:
+                    status = "farmed"
+                    notes = None
                 conn.execute(
                     """INSERT INTO accounts
-                       (email,password,access_token,refresh_token,batch_id,status,token_exp,token_health)
-                       VALUES (?,?,?,?,?,?,?,?)""",
+                       (email,password,access_token,refresh_token,batch_id,status,token_exp,token_health,notes)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
                     (
                         p[0],
                         p[1] if len(p) > 1 else "",
                         at,
                         p[3] if len(p) > 3 else "",
                         batch,
-                        "farmed",
+                        status,
                         exp,
                         health,
+                        notes,
                     ),
                 )
                 n += 1
