@@ -21,7 +21,7 @@ Schema migrations are additive via `db_schema.migrate()` (import/workflow/health
 | `created_at` | TIMESTAMP | Insert time |
 | `batch_id` | TEXT | e.g. `batch_20260712_183504_201d0f` |
 | `proxy_used` | TEXT | Proxy URL at inject time |
-| `status` | TEXT | `farmed` \| `injected` \| `error` |
+| `status` | TEXT | Pipeline mark only: `farmed` \| `injected` \| `error` (not session lifecycle) |
 | `injected_at` | TIMESTAMP | When marked injected |
 | `grok_cli_connection_id` | TEXT | Optional 9router id |
 | `ninerouter_name` | TEXT | Optional display name |
@@ -31,7 +31,7 @@ Schema migrations are additive via `db_schema.migrate()` (import/workflow/health
 | `last_probe_at` | TEXT | ISO UTC of last live probe (nullable) |
 | `last_probe_status` | TEXT | Live probe result (see probe statuses) |
 | `last_probe_http` | INTEGER | HTTP status from last probe (nullable) |
-| `needs_relogin` | INTEGER | `1` if live probe says re-auth needed; `0` if last probe `alive`; unchanged on transient |
+| `needs_relogin` | INTEGER | Soft inventory flag: `1` if last live probe rejected the token; `0` if last probe `alive`; unchanged on transient. **Does not** trigger re-auth or session recovery on the farm |
 
 Probe columns are additive via `token_util.ensure_probe_columns` (called from `db_schema.migrate`).
 
@@ -40,7 +40,7 @@ Probe columns are additive via `token_util.ensure_probe_columns` (called from `d
 | Status | Meaning |
 |--------|---------|
 | `alive` | API accepted Bearer (HTTP 2xx) |
-| `needs_relogin` | HTTP 401/403 — token rejected (soft inventory; optional hard mark) |
+| `needs_relogin` | HTTP 401/403 — token rejected (soft inventory meta only; optional hard mark; **not** a re-auth workflow) |
 | `rate_limited` | HTTP 429 |
 | `spend_limited` | Spending / quota style body or 402-class |
 | `network_error` | Transport / timeout |
@@ -48,7 +48,7 @@ Probe columns are additive via `token_util.ensure_probe_columns` (called from `d
 | `missing` | Empty access token |
 | `jwt_expired` | Offline JWT `exp` passed (skip live HTTP when `GROK_PROBE_SKIP_EXPIRED=1`) |
 
-**Soft default:** probe updates meta only. Never set `status=error` on `injected` unless operator passes `--mark-error` (CLI) — preserves 9router connection IDs.
+**Soft default:** probe updates meta only. Never set `status=error` on `injected` unless operator passes `--mark-error` (CLI) — preserves 9router connection IDs. Probe/JWT columns are **observability**, not session management; farm product scope is autofarm + auto-inject only.
 
 ### Table `proxy_stats`
 
@@ -91,12 +91,17 @@ Tracks farm/OTP outcomes per catch-all domain so multi-domain pools can auto-ski
 - `idx_proxy_score` on `proxy_stats(score DESC)`
 - `idx_domain_score` on `domain_stats(score DESC)`
 
-### State machine
+### Pipeline status flow (inject queue — not session lifecycle)
 
 ```
 (missing) --import--> farmed --workflow success--> injected
                  \-- dead JWT on import / inject fail / mark_expired --> error
 ```
+
+- **`farmed`:** credentials in DB, waiting for on-path inject (steady state ≈ 0 when farmer is healthy).
+- **`injected`:** handoff to 9router succeeded; farm no longer owns session validity.
+- **`error`:** pipeline failure or dead farmed JWT — recovery is **re-farm + inject**, not reauth.
+- Soft columns (`token_health`, `needs_relogin`, `last_probe_*`) do **not** move rows through a session state machine.
 
 ### Import fail-closed (JWT)
 

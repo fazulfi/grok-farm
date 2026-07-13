@@ -8,8 +8,18 @@
 
 ## 1. System context
 
-Grok Farm is a **production account-farming pipeline** for xAI Grok CLI OAuth credentials, with optional **auto-injection** into a self-hosted **9router** gateway.
+Grok Farm is a **production autofarm + auto-inject pipeline** for xAI Grok CLI OAuth credentials into a self-hosted **9router** gateway.
 
+**Product scope (authoritative):**
+
+| In scope | Out of scope |
+|----------|--------------|
+| Farm accounts (OTP → OAuth PKCE) | Browser re-auth / session refresh |
+| On-path inject (`farmed` → `injected` in the same loop) | Keeping injected tokens alive after handoff |
+| Proxy sync from 9router `proxyPools` | Session lifecycle management on the farm |
+| Optional soft inventory (JWT/probe meta, health timer) | Auto flip `injected`→`error` or auto re-login |
+
+After inject, token alive/dead is a **9router / consumer** concern. Steady state: `farmed` backlog ≈ **0**.
 ```
 ┌─────────────┐     catch-all      ┌──────────────┐
 │ Cloudflare  │ ─────────────────► │ Gmail IMAP   │
@@ -91,8 +101,7 @@ Unlimited loop:
 
 ### 3.3 Data plane (`akun.db`)
 
-SQLite inventory of farmed accounts and injection state.
-
+SQLite **pipeline bookkeeping** for farm → inject (status marks, inject IDs, optional probe/JWT meta). Not a session store: rows track whether credentials were farmed and whether inject succeeded — not whether the gateway session is still valid.
 ### 3.4 Integration plane (9router)
 
 - **proxyPools** — source of truth for residential proxies
@@ -160,7 +169,16 @@ See [CAPACITY.md](./CAPACITY.md).
 
 ---
 
-## 8. Related docs
+## 8. Non-goals (do not invent)
+
+- **No session manager:** farm does not refresh, re-login, or heal injected tokens.
+- **No re-auth automation:** browser re-auth / refresh-token recovery is out of scope unless the operator explicitly re-enables it.
+- **No default hard mark of injected:** soft probe/JWT tools update meta only; capacity recovery = **re-farm + re-inject**, not reauth.
+- **Health / probe / reconcile:** observability and inventory hygiene only — not session recovery workflows.
+
+---
+
+## 9. Related docs
 
 - [OPERATIONS.md](./OPERATIONS.md) — day-2 ops
 - [INTEGRATION-9ROUTER.md](./INTEGRATION-9ROUTER.md) — inject contract
