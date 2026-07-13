@@ -10,7 +10,14 @@ import sys
 from datetime import datetime, timezone
 
 from alerts import send_alert
-from db_schema import DEFAULT_DB, harden_db_file, migrate, record_proxy_result
+from db_schema import (
+    DEFAULT_DB,
+    harden_db_file,
+    migrate,
+    proxy_key,
+    proxies_to_skip,
+    record_proxy_result,
+)
 from log_redact import redact, redact_proxy_url, safe_print
 from token_util import token_health, update_account_token_meta
 
@@ -119,6 +126,36 @@ def fetch_all_proxies_from_9router() -> list[str]:
     return out
 
 
+def _proxy_score_map(conn: "sqlite3.Connection") -> dict[str, float]:
+    """proxy_key -> score from proxy_stats (default 0.5 if unknown)."""
+    out: dict[str, float] = {}
+    try:
+        for r in conn.execute("SELECT proxy_key, score FROM proxy_stats"):
+            try:
+                k = str(r[0] if not hasattr(r, "keys") else r["proxy_key"])
+                s = float(r[1] if not hasattr(r, "keys") else r["score"] or 0.5)
+                out[k] = max(0.01, min(1.0, s))
+            except (TypeError, ValueError, KeyError, IndexError):
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def pick_proxy(proxies: list[str], skip_keys: set[str], scores: dict[str, float]) -> str:
+    """Score-weighted pick among non-skipped proxies; fail-open to full pool if all skipped."""
+    if not proxies:
+        raise ValueError("empty proxy list")
+    eligible = [p for p in proxies if proxy_key(p) not in skip_keys]
+    if not eligible:
+        # fail-open: never empty the inject pool via soft skip alone
+        eligible = list(proxies)
+    weights = [scores.get(proxy_key(p), 0.5) for p in eligible]
+    # random.choices needs positive weights
+    weights = [max(0.01, float(w)) for w in weights]
+    return random.choices(eligible, weights=weights, k=1)[0]
+
+
 def main() -> int:
     import sqlite3
 
@@ -136,6 +173,17 @@ def main() -> int:
     conn = sqlite3.connect(CSA_DB)
     conn.row_factory = sqlite3.Row
     migrate(conn)
+    skip_keys: set[str] = set()
+    try:
+        skip_keys = proxies_to_skip(conn)
+    except Exception:
+        skip_keys = set()
+    scores = _proxy_score_map(conn)
+    if skip_keys:
+        print(
+            f"[WORKFLOW] soft-skip {len(skip_keys)} proxy keys "
+            f"(consec/disabled); fail-open if all filtered"
+        )
     rows = conn.execute(
         "SELECT email, access_token, refresh_token FROM accounts WHERE status='farmed' ORDER BY id"
     ).fetchall()
@@ -179,7 +227,7 @@ def main() -> int:
                 safe_print(f"[WORKFLOW] mark expired failed {email}: {e}")
             skipped_bad += 1
             continue
-        proxy = random.choice(proxies)
+        proxy = pick_proxy(proxies, skip_keys, scores)
         email_proxy[email] = proxy
         lines.append(
             json.dumps(
