@@ -12,7 +12,7 @@
 | Disk | 150+ GB SSD |
 | Network | 1 Gbps class VPS |
 
-**Live production (2026-07-14):** DO fleet grok3–grok6. Legacy CSA (`168.144.137.240`) **retired**.
+**Live production (2026-07-14):** DO fleet grok3–grok7. Legacy CSA (`168.144.137.240`) **retired**.
 
 ---
 
@@ -104,9 +104,10 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 | Tag | IP | Spec | Concurrent | Mid-drain | Notes |
 |-----|-----|------|------------|-----------|-------|
 | grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **3** | **120s** | only host with mid-drain |
-| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **3** | off | staggered inject |
+| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **3** | off | staggered inject; fleet digest leader |
 | grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
 | grok6 | `174.138.24.143` | **2 vCPU / 4G / 120G** + 8G swap | **1** | off | light farmer only (not full 8G parity) |
+| grok7 | `157.245.199.70` | 4 vCPU / 8G / 240G | **3** | off | staggered inject |
 | grok2 | `157.245.149.116` | 4G | — | — | optional light; not required |
 | ~~CSA~~ | `168.144.137.240` | — | — | — | **retired** 2026-07-14 |
 
@@ -123,7 +124,7 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 | SSH | key-only root; farmer ed25519 on 9router `authorized_keys` |
 | Key backup (trial) | workstation `~/.ssh/grok-farmers-backup/{host}/` — **never git** |
 
-**Inject contention:** prefer mid-drain on a **single** host; others post-batch inject only. Do not run 4 hosts at concurrent 3 into the same SQLite gateway without observing lock errors.
+**Inject contention:** prefer mid-drain on a **single** host; others post-batch inject only. Do not run 4–5 hosts at concurrent 3 into the same SQLite gateway without observing lock errors.
 
 ---
 
