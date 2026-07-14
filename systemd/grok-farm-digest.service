@@ -1,0 +1,15 @@
+[Unit]
+Description=Grok Farm daily digest + proxy dashboard (Telegram)
+Documentation=https://github.com/fazulfi/grok-farm
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=magadirxwin
+Group=magadirxwin
+WorkingDirectory=/home/magadirxwin/grok-farm
+ExecStart=/bin/bash /home/magadirxwin/grok-farm/scripts/daily_digest.sh
+# exit 2 = Telegram not configured / send failed — still a finished oneshot
+SuccessExitStatus=2
+Nice=10
+PrivateTmp=true

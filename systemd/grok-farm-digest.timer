@@ -1,0 +1,12 @@
+[Unit]
+Description=Grok Farm daily digest + proxy dashboard (once per day)
+Requires=grok-farm-digest.service
+
+[Timer]
+# ~01:00 UTC daily; stagger hosts with random delay
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target
