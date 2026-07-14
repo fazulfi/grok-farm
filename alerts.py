@@ -223,7 +223,12 @@ def _post_json(
                     body = parsed
             except Exception:
                 pass
-        print(f"[ALERT] post failed: {redact(e)}")
+        # editMessageText "message is not modified" is expected for sticky no-op
+        desc = ""
+        if body and isinstance(body, dict):
+            desc = str(body.get("description") or "").lower()
+        if "message is not modified" not in desc:
+            print(f"[ALERT] post failed: {redact(e)}")
         return False, body
 
 
