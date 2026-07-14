@@ -4,17 +4,6 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
-### Added
-
-- **Daily digest + proxy dashboard (Telegram):** `daily_digest.py` +
-  `scripts/daily_digest.sh` + `systemd/grok-farm-digest.{service,timer}`
-  (~01:00 UTC + ≤20m random). Each host posts one HTML card with health
-  inventory (farmer, accounts, JWT/soft probe, disk, backup, hard/soft issues)
-  and **proxy dashboard** (file lines, soft-skip/disabled counts, fail_reason
-  taxonomy, top/worst redacted proxies, domain_stats). Manual:
-  `python daily_digest.py` / `--proxy-only` / `--dry-run`. `skip_debounce=True`;
-  no JWT/password; zero ban risk (inventory only). Deploy installs digest timer.
-
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
@@ -22,6 +11,28 @@ All notable changes to Grok Farm are documented here.
   roadmap until operator re-enables
 - Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
   (never product auto-evict)
+
+## [2.3.2] — 2026-07-14
+
+### Added
+
+- **Daily digest + proxy dashboard (Telegram):** `daily_digest.py` +
+  `scripts/daily_digest.sh` + `systemd/grok-farm-digest.{service,timer}`
+  (~01:00 UTC + ≤5m random). Health inventory + **proxy dashboard**
+  (soft-skip/disabled, fail taxonomy, top/worst redacted, domain_stats).
+  Deploy installs digest timer. Zero ban risk (inventory only).
+- **Fleet-wide digest (1 Telegram/day):** when `~/.config/grok-farm/backup.env`
+  is present, each host uploads a redacted snapshot to
+  `s3://…/farm-vps/fleet-digest/YYYY-MM-DD/<host>.json`; **leader** waits for
+  peers (`GROK_FLEET_DIGEST_WAIT_SEC`, default 900) and posts **one** fleet
+  card. Followers do not send Telegram. Flags: `--local` (per-host card),
+  `--fleet`, `--no-wait`. Env: `GROK_FLEET_DIGEST*`, `GROK_HOST_TAG`
+  (see `.env.example`). RUNBOOK **R20** updated.
+
+### Changed
+
+- Digest timer `RandomizedDelaySec` **20m → 5m** so fleet followers land inside
+  leader wait window.
 
 ## [2.3.1] — 2026-07-14
 
