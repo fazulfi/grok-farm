@@ -69,9 +69,12 @@ WebShare / 9router proxyPools (non-EU) → Farm VPS (non-root user)
 
 | Role | Example host | User | Notes |
 |------|--------------|------|-------|
-| Farmer | CSA `152.42.242.192` | `magadirxwin` (non-root) | `~/grok-farm` |
+| Farmer (primary / legacy CSA) | `168.144.137.240` (alias `csa`; may be down) | `magadirxwin` | `~/grok-farm` · concurrent ~3 |
+| Farmer fleet (DO trial 2026-07) | `grok4` `157.245.49.4` · `grok3` `143.198.86.242` · `grok5` `206.189.37.233` | `magadirxwin` | 4 vCPU / 8 GB · concurrent **2** · key-only SSH |
 | Gateway | 9router `49.12.82.34:39999` | SSH for inject/sync | HTTP API often `20128` |
 | Backup | S3 `s3://grok-farm/...` on `is3.cloudhost.id` | keys only on VPS | never in git |
+
+**Multi-VPS rules (CAPACITY §6):** shared IMAP/domains OK; per-host `akun.db`; `GROK_EMAIL_STYLE=crypto`; mid-drain (`GROK_MID_DRAIN_INTERVAL=120`) on **one** host only (others `0`); never commit secrets; farmer SSH keys backed up off-VPS for trial hosts.
 
 ### Source of truth
 
@@ -315,14 +318,21 @@ Automating account creation may violate third-party ToS. Agents implement techni
 | S3 restore over live `akun.db` | No | DR path only with confirm |
 | Revoke sudo / tighten SSH | Yes (security hardening) | Prefer additive + verify farmer still runs |
 
-**Live paths (production — verify before assuming; updated 2026-07-13):**
+**Live paths (verify before assuming; updated 2026-07-14):**
 
-- Farm host: `168.144.137.240` (SSH alias `csa`; old `152.42.242.192` suspended)
-- App: `/home/magadirxwin/grok-farm`
-- DB: `/home/magadirxwin/grok-farm/akun.db` (mode 600)
-- Unit: `grok-farmer.service` → `brutal_farmer.sh` **v5**
-- 9router SSH: `root@49.12.82.34 -p 39999` with farm user key (do not print private key)
-- **DR:** if this VPS dies → `docs/MIGRATION.md` PATH A/B + RUNBOOK **R16** (rebuild from age backup or `ops/export_9r_to_akun.py`)
+| Host | IP | Role | Concurrent | Mid-drain |
+|------|-----|------|------------|-----------|
+| CSA (legacy) | `168.144.137.240` | primary when up | ~3 | on |
+| grok4 | `157.245.49.4` | DO farmer | 2 | **120s** |
+| grok3 | `143.198.86.242` | DO farmer | 2 | off (`0`) |
+| grok5 | `206.189.37.233` | DO farmer | 2 | off (`0`) |
+
+- App (all farmers): `/home/magadirxwin/grok-farm`
+- DB: per-host `/home/magadirxwin/grok-farm/akun.db` (mode 600)
+- Unit: `grok-farmer.service` → `brutal_farmer.sh` **v5** + timers health/probe/reconcile/mark-expired/backup
+- 9router SSH: `root@49.12.82.34 -p 39999` with **per-host** farmer key (`~/.ssh/id_ed25519` on VPS; workstation backup under `~/.ssh/grok-farmers-backup/` for trial hosts — **never git**)
+- Root SSH on DO fleet: **key-only** (PasswordAuthentication no); rotate root password if ever chat-exposed
+- **DR:** trial VPS dies → rebuild from key backup + secrets off-box + `docs/MIGRATION.md` / RUNBOOK **R16**; gateway tokens remain SoT via `ops/export_9r_to_akun.py`
 
 If host/user differs on a new VPS, follow `docs/DEPLOYMENT.md` / unit `User=` — do not hardcode host IP into portable code without env override.
 

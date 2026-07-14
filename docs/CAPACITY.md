@@ -97,6 +97,31 @@ VPS-F3 ──┘
 
 Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 
+### 6.2 Live multi-VPS inventory (2026-07-14)
+
+| Tag | IP | Spec | Concurrent | Mid-drain | Notes |
+|-----|-----|------|------------|-----------|-------|
+| CSA | `168.144.137.240` | 8G class | ~3 | on | legacy primary; may be offline |
+| grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **2** | **120s** | only host with mid-drain |
+| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **2** | off | staggered inject |
+| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **2** | off | staggered inject |
+| grok2 | `157.245.149.116` | 4G | — | — | **skip** full parity (RAM) |
+
+**Must on every farmer host:**
+
+| Setting | Value |
+|---------|--------|
+| User / app | `magadirxwin` / `/home/magadirxwin/grok-farm` |
+| `GROK_EMAIL_STYLE` | `crypto` (multi-VPS collision hygiene) |
+| `GROK_PROXY_FILE` | `.../usa_proxies.txt` (sync from 9router SoT) |
+| `GROK_9R_*` | `root@49.12.82.34` · port `39999` · host key |
+| Proxy pool | soft-filter sync; empty file → skip farm round |
+| Secrets | `.env` + `identities.json` chmod **600**; quote passwords with `#`/`&` |
+| SSH | key-only root; farmer ed25519 on 9router `authorized_keys` |
+| Key backup (trial) | workstation `~/.ssh/grok-farmers-backup/{host}/` — **never git** |
+
+**Inject contention:** prefer mid-drain on a **single** host; others post-batch inject only. Do not run 4 hosts at concurrent 3 into the same SQLite gateway without observing lock errors.
+
 ---
 
 ## 7. Disk growth
