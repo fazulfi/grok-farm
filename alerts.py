@@ -488,6 +488,18 @@ def _section_banner(stripped: str) -> Optional[str]:
     return None
 
 
+def _is_dashboard_extra(extra: Optional[dict[str, Any]]) -> bool:
+    """Ops dashboard cards skip log-style key=value meta strips."""
+    if not extra:
+        return False
+    if extra.get("dashboard") in (True, 1, "1", "true", "yes"):
+        return True
+    # Heuristic: fleet sticky payloads
+    if extra.get("hosts") is not None and extra.get("injected") is not None:
+        return True
+    return False
+
+
 def format_alert_html(
     title: str,
     body: str,
@@ -497,64 +509,116 @@ def format_alert_html(
     """
     Rich HTML card for Telegram parse_mode=HTML.
     Escapes all user content; never embeds JWT/password (caller must redact).
-    Uses blockquote meta strip + section banners + optional status bar for denser UX.
+
+    Dashboard mode (extra.dashboard / fleet sticky): clean header + body sections
+    only — no key=value meta dump (that looked like a system log).
+    Legacy mode: blockquote meta strip + section banners for batch alerts.
     """
     emoji, label = LEVEL_META.get(level.lower(), ("ℹ️", level.upper()))
-    parts: list[str] = [
-        f"<b>{emoji} {html_escape(label)} · Grok Farm</b>",
-        f"<b>{html_escape(title)}</b>",
-    ]
+    dashboard = _is_dashboard_extra(extra)
 
-    # Meta strip as blockquote (Telegram renders with left accent bar — more “UI”)
-    meta_lines: list[str] = []
-    if extra:
-        for key, icon in (
-            ("host", "🖥️"),
-            ("batch_id", "📦"),
-            ("created", "✅"),
-            ("failed", "❌"),
-            ("fail_class", "🏷️"),
-            ("ok", "✅"),
-            ("fail", "❌"),
-        ):
-            if key in extra and extra[key] is not None and str(extra[key]) != "":
-                meta_lines.append(
-                    f"{icon} <b>{html_escape(key)}</b> "
-                    f"<code>{html_escape(str(extra[key])[:80])}</code>"
-                )
-        # Status bar when we have ok/fail or created/failed counts
-        try:
-            ok_n = int(extra.get("ok") or extra.get("created") or 0)
-            fail_n = int(extra.get("fail") or extra.get("failed") or 0)
-            if ok_n or fail_n:
-                bar = _status_bar(ok_n, fail_n)
-                meta_lines.append(
-                    f"📊 <code>{bar}</code> "
-                    f"<b>{ok_n}</b> ok · <b>{fail_n}</b> fail"
-                )
-        except (TypeError, ValueError):
-            pass
-    if meta_lines:
-        # Telegram HTML supports <blockquote> (Bot API 7.0+)
-        parts.append("<blockquote>" + "\n".join(meta_lines) + "</blockquote>")
+    if dashboard:
+        # True dashboard: title + optional thin KPI bar only (no host= / ok= soup)
+        parts: list[str] = [
+            f"<b>{emoji} {html_escape(title)}</b>",
+        ]
+        kpi: list[str] = []
+        if extra:
+            hosts = extra.get("hosts")
+            if hosts is not None and str(hosts) != "":
+                kpi.append(f"🖥️ <b>{html_escape(str(hosts)[:40])}</b>")
+            inj = extra.get("injected")
+            if inj is not None and str(inj) != "":
+                kpi.append(f"💉 <b>{html_escape(str(inj)[:20])}</b>")
+            try:
+                ok_n = int(extra.get("ok") or 0)
+                fail_n = int(extra.get("fail") or 0)
+                if ok_n or fail_n:
+                    bar = _status_bar(ok_n, fail_n)
+                    kpi.append(f"<code>{bar}</code> {ok_n}/{fail_n}")
+            except (TypeError, ValueError):
+                pass
+        if kpi:
+            parts.append("<blockquote>" + "  ·  ".join(kpi) + "</blockquote>")
     else:
-        parts.append("────────────────────")
+        parts = [
+            f"<b>{emoji} {html_escape(label)} · Grok Farm</b>",
+            f"<b>{html_escape(title)}</b>",
+        ]
+        # Meta strip as blockquote (legacy batch / health cards)
+        meta_lines: list[str] = []
+        if extra:
+            for key, icon in (
+                ("host", "🖥️"),
+                ("batch_id", "📦"),
+                ("created", "✅"),
+                ("failed", "❌"),
+                ("fail_class", "🏷️"),
+                ("ok", "✅"),
+                ("fail", "❌"),
+            ):
+                if key in extra and extra[key] is not None and str(extra[key]) != "":
+                    meta_lines.append(
+                        f"{icon} <b>{html_escape(key)}</b> "
+                        f"<code>{html_escape(str(extra[key])[:80])}</code>"
+                    )
+            try:
+                ok_n = int(extra.get("ok") or extra.get("created") or 0)
+                fail_n = int(extra.get("fail") or extra.get("failed") or 0)
+                if ok_n or fail_n:
+                    bar = _status_bar(ok_n, fail_n)
+                    meta_lines.append(
+                        f"📊 <code>{bar}</code> "
+                        f"<b>{ok_n}</b> ok · <b>{fail_n}</b> fail"
+                    )
+            except (TypeError, ValueError):
+                pass
+        if meta_lines:
+            parts.append("<blockquote>" + "\n".join(meta_lines) + "</blockquote>")
+        else:
+            parts.append("────────────────────")
 
-    # Body lines: key=value → bold key + code value; section headers → banner; bullets → email in code
+    # Body lines
     kv_token_re = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=([^\s]+)")
     section_re = re.compile(r"^[A-Za-z].*\):$|^[A-Za-z].*:$")
+    # Dashboard section titles (FLEET: / LIVE: / HOSTS: / PROXY:)
+    dash_sections = {"fleet", "live", "hosts", "proxy", "kpi", "events"}
     for raw_line in (body or "").splitlines():
         line = raw_line.rstrip()
         if not line.strip():
             parts.append("")
             continue
         stripped = line.strip()
-        # Section headers from farm/workflow ("OK accounts (2):", "FAILED (1):")
+        # Dashboard section headers
+        if dashboard and stripped.endswith(":") and stripped[:-1].strip().lower() in dash_sections:
+            name = stripped[:-1].strip().upper()
+            icons = {"FLEET": "🛰️", "LIVE": "⚡", "HOSTS": "🖥️", "PROXY": "🌐"}
+            ico = icons.get(name, "▸")
+            parts.append(f"{ico} <b>{html_escape(name)}</b>")
+            continue
+        # Nested email lines under LIVE (✓ / ✗)
+        if dashboard and (
+            stripped.startswith("✓")
+            or stripped.startswith("✗")
+            or stripped.startswith("…")
+            or stripped.startswith("class:")
+        ):
+            m_email = re.search(r"[\w.+-]+@[\w.-]+\.\w+", stripped)
+            if m_email:
+                em = m_email.group(0)
+                before, after = stripped[: m_email.start()], stripped[m_email.end() :]
+                parts.append(
+                    f"    {html_escape(before)}<code>{html_escape(em)}</code>{html_escape(after)}"
+                )
+            else:
+                parts.append(f"    <i>{html_escape(stripped)}</i>")
+            continue
+        # Section headers from farm/workflow
         if section_re.match(stripped) and not stripped.startswith("•") and "=" not in stripped:
             banner = _section_banner(stripped)
             parts.append(banner or f"<b>{html_escape(stripped)}</b>")
             continue
-        # Bullet lines (account lists / fail detail) — highlight first email in <code>
+        # Bullet lines
         if stripped.startswith("•") or stripped.startswith("…") or stripped.startswith("..."):
             indent = line[: len(line) - len(line.lstrip())]
             rest = stripped[1:].lstrip() if stripped.startswith("•") else stripped
@@ -570,23 +634,22 @@ def format_alert_html(
             else:
                 parts.append(f"{indent}• {html_escape(rest)}")
             continue
-        # One or more key=value tokens on the line
-        tokens = list(kv_token_re.finditer(stripped))
-        if tokens and tokens[0].start() == 0:
-            chips_line = " · ".join(
-                f"<b>{html_escape(m.group(1))}</b>=<code>{html_escape(m.group(2)[:120])}</code>"
-                for m in tokens
-            )
-            # Trailing free text after last token (if any)
-            tail = stripped[tokens[-1].end() :].strip()
-            if tail:
-                chips_line += f" {html_escape(tail[:100])}"
-            parts.append(chips_line)
-            continue
+        # Skip key=value chip rendering in dashboard mode (body is already UI)
+        if not dashboard:
+            tokens = list(kv_token_re.finditer(stripped))
+            if tokens and tokens[0].start() == 0:
+                chips_line = " · ".join(
+                    f"<b>{html_escape(m.group(1))}</b>=<code>{html_escape(m.group(2)[:120])}</code>"
+                    for m in tokens
+                )
+                tail = stripped[tokens[-1].end() :].strip()
+                if tail:
+                    chips_line += f" {html_escape(tail[:100])}"
+                parts.append(chips_line)
+                continue
         parts.append(html_escape(line))
 
     text = "\n".join(parts).strip()
-    # Telegram limit 4096; leave headroom
     if len(text) > 4000:
         text = text[:3990] + "\n…"
     return text
@@ -672,6 +735,21 @@ def _edit_telegram(
     return False
 
 
+def _delete_telegram(message_id: int) -> bool:
+    """Best-effort deleteMessage so only one sticky card remains in chat."""
+    token = telegram_bot_token()
+    chat_id = telegram_chat_id()
+    if not token or not chat_id or not message_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/deleteMessage"
+    ok, _body = _post_json(
+        url, {"chat_id": chat_id, "message_id": int(message_id)}
+    )
+    if ok:
+        print(f"[ALERT] sticky deleted mid={message_id}", flush=True)
+    return ok
+
+
 def _send_telegram_rich(
     html_text: str,
     plain_text: str,
@@ -694,6 +772,18 @@ def _send_telegram_rich(
     return _send_telegram(plain_text, parse_mode=None, message_effect_id=None)
 
 
+def _ops_dashboard_env_on() -> bool:
+    raw = (os.environ.get("GROK_OPS_DASHBOARD") or "1").strip().lower()
+    return raw not in ("0", "false", "off", "no")
+
+
+def _default_sticky_name() -> str:
+    return (
+        (os.environ.get("GROK_OPS_DASHBOARD_STICKY_NAME") or "fleet_digest").strip()
+        or "fleet_digest"
+    )
+
+
 def send_or_edit_sticky(
     title: str,
     body: str = "",
@@ -703,24 +793,36 @@ def send_or_edit_sticky(
     sticky_name: str = "fleet_digest",
     force_new: bool = False,
 ) -> bool:
-    """Send or edit a single sticky Telegram message (live-updating card).
+    """Send or edit a **single** sticky Telegram message (live-updating card).
 
-    Used by fleet daily digest so the bot keeps one message that updates
-    instead of spamming a new card each run. Falls back to sendMessage if
-    no saved message_id or edit fails (message deleted / too old).
+    Always prefers editMessageText. If edit fails or force_new, deletes the old
+    message (best-effort) then sendMessage once — keeps chat to **1 pesan only**.
     Effects only on brand-new send (Telegram cannot animate edits).
     """
     has_tg = bool(telegram_bot_token() and telegram_chat_id())
     if not has_tg:
-        # Fallback: normal alert path (webhook may still work)
+        # No Telegram: webhook-only path without creating extra TG messages
+        url = webhook_url()
+        if not url:
+            return False
         return send_alert(title, body, level=level, extra=extra, skip_debounce=True)
+
+    # Ensure dashboard payloads render as clean UI, not log dump
+    extra_use: dict[str, Any] = dict(extra) if isinstance(extra, dict) else {}
+    if sticky_name in ("fleet_digest", "ops_dashboard") and "dashboard" not in extra_use:
+        extra_use["dashboard"] = True
 
     safe_title = redact(title)[:200]
     safe_body = redact(body)[:3500]
     plain = format_alert_plain(safe_title, safe_body, level)
-    html = format_alert_html(safe_title, safe_body, level, extra)
+    html = format_alert_html(safe_title, safe_body, level, extra_use)
 
     mid: Optional[int] = None if force_new else load_sticky_message_id(sticky_name)
+    if force_new and mid is not None:
+        _delete_telegram(mid)
+        clear_sticky_message_id(sticky_name)
+        mid = None
+
     if mid is not None:
         if _edit_telegram(mid, html, parse_mode="HTML"):
             print(
@@ -737,9 +839,10 @@ def send_or_edit_sticky(
             save_sticky_message_id(mid, sticky_name)
             return True
         print(
-            f"[ALERT] sticky edit failed mid={mid} — sending new message",
+            f"[ALERT] sticky edit failed mid={mid} — delete+resend one message",
             flush=True,
         )
+        _delete_telegram(mid)
         clear_sticky_message_id(sticky_name)
 
     ok, new_mid = _send_telegram_rich(html, plain, level=level)
@@ -829,11 +932,13 @@ def send_alert(
 ) -> bool:
     """
     Fire alert if Telegram (token+chat_id) and/or GROK_ALERT_WEBHOOK is set.
-    Discord: markdown content with emoji level.
-    Telegram: HTML card (parse_mode=HTML) + optional message_effect_id animation,
-    plain fallback. Never includes raw JWTs — body is redacted. Never logs bot token.
+
+    When GROK_OPS_DASHBOARD=1 (default) and Telegram is configured, Telegram
+    traffic is routed to **send_or_edit_sticky** (one live card only — no spam).
+    Discord webhook still gets a new post when set.
+
+    Never includes raw JWTs — body is redacted. Never logs bot token.
     Debounce: GROK_ALERT_DEBOUNCE_MIN (default 60) minutes per title+issues fingerprint.
-    Per-batch farm/inject detail should pass skip_debounce=True so each batch notifies.
     Effects: GROK_TELEGRAM_EFFECTS=0 disables private-chat animation effects.
     """
     url = webhook_url()
@@ -843,14 +948,24 @@ def send_alert(
     if not skip_debounce and not _should_send(title, body, level, extra):
         return False
     safe_title = redact(title)[:200]
-    # Larger body for account lists (Telegram hard-capped at 4000)
     safe_body = redact(body)[:3500]
 
     plain = format_alert_plain(safe_title, safe_body, level)
     html = format_alert_html(safe_title, safe_body, level, extra)
 
     sent = False
-    if has_tg:
+    # Single-message Telegram mode (ops dashboard sticky)
+    if has_tg and _ops_dashboard_env_on():
+        sticky_ok = send_or_edit_sticky(
+            title,
+            body,
+            level=level,
+            extra=extra,
+            sticky_name=_default_sticky_name(),
+            force_new=False,
+        )
+        sent = sticky_ok or sent
+    elif has_tg:
         ok_tg, _mid = _send_telegram_rich(html, plain, level=level)
         sent = ok_tg or sent
     if url:
