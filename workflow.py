@@ -293,6 +293,7 @@ def main() -> int:
                 update_account_token_meta(c2, email, tok)
         c2.commit()
         # 2) Best-effort proxy scoring + fail taxonomy (never undo inject marks)
+        fail_class = ""
         try:
             from db_schema import classify_proxy_fail
 
@@ -320,21 +321,65 @@ def main() -> int:
             f"[WORKFLOW] Marked {len(ok_emails)} as injected "
             f"(failed={len(failed)}, proxy from 9router pools)"
         )
-        if failed and not ok_emails:
-            send_alert(
-                "inject all failed",
-                f"attempted={len(attempted)} failed={len(failed)}",
-                level="critical",
-            )
-        elif failed:
-            send_alert(
-                "inject partial",
-                f"ok={len(ok_emails)} failed={len(failed)}",
-                level="warning",
-            )
+        # Per-batch inject alert with full email lists (no JWT/password).
+        try:
+            import socket
+
+            from alerts import format_email_list
+
+            host = socket.gethostname()
+            ok_list = sorted(ok_emails)
+            fail_list = sorted(failed)
+            fail_detail_lines: list[str] = []
+            for em in fail_list[:40]:
+                px = redact_proxy_url(email_proxy.get(em, "") or "")
+                fail_detail_lines.append(f"  • {em} proxy={px or '-'} class={fail_class or 'unknown'}")
+            if len(fail_list) > 40:
+                fail_detail_lines.append(f"  … +{len(fail_list) - 40} more")
+
+            body_parts = [
+                f"host={host}",
+                f"ok={len(ok_list)} failed={len(fail_list)} attempted={len(attempted)}",
+                f"fail_class={fail_class or '-'}",
+                "",
+                f"OK injected ({len(ok_list)}):",
+                format_email_list(ok_list),
+            ]
+            if fail_list:
+                body_parts.append("")
+                body_parts.append(f"FAILED inject ({len(fail_list)}):")
+                body_parts.extend(fail_detail_lines if fail_detail_lines else [format_email_list(fail_list)])
+
+            body = "\n".join(body_parts)
+            if failed and not ok_emails:
+                send_alert(
+                    "inject all failed",
+                    body,
+                    level="critical",
+                    extra={"host": host, "failed": fail_list[:50], "fail_class": fail_class},
+                    skip_debounce=True,
+                )
+            elif failed:
+                send_alert(
+                    "inject partial",
+                    body,
+                    level="warning",
+                    extra={"host": host, "ok": ok_list[:50], "failed": fail_list[:50]},
+                    skip_debounce=True,
+                )
+            elif ok_emails:
+                send_alert(
+                    "inject batch ok",
+                    body,
+                    level="info",
+                    extra={"host": host, "ok": ok_list[:50]},
+                    skip_debounce=True,
+                )
+        except Exception as ae:
+            safe_print(f"[WORKFLOW] inject alert error: {ae}")
     except Exception as e:
         safe_print(f"[WORKFLOW] inject error: {e}")
-        send_alert("inject error", str(e), level="critical")
+        send_alert("inject error", str(e), level="critical", skip_debounce=True)
         return 1
     print(f"[WORKFLOW] Finished {now_iso()}")
     return 0
