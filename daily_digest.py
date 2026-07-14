@@ -466,6 +466,60 @@ def pick_fleet_level(snaps: list[dict[str, Any]]) -> str:
     return worst
 
 
+def _host_status_dot(s: dict[str, Any]) -> str:
+    """🟢 healthy · 🟡 soft noise · 🔴 hard / farmer down · ⚪ unknown."""
+    farmer = str(s.get("farmer") or "").lower()
+    hard = s.get("issues_hard") or []
+    soft = s.get("issues_soft") or []
+    rc = int(s.get("health_rc") or 0)
+    if hard or rc == 3 or farmer not in ("active", "activating", ""):
+        if farmer and farmer not in ("active", "activating"):
+            return "🔴"
+        if hard or rc == 3:
+            return "🔴"
+    if soft or rc == 2:
+        return "🟡"
+    if farmer in ("active", "activating") or rc == 0:
+        return "🟢"
+    return "⚪"
+
+
+def _kind_icon(kind: str) -> str:
+    k = (kind or "").lower()
+    if "inject" in k:
+        return "💉"
+    if "farm" in k:
+        return "🌾"
+    if "smoke" in k:
+        return "🧪"
+    if "health" in k or "digest" in k:
+        return "🩺"
+    return "⚡"
+
+
+def _rel_age(ts: str) -> str:
+    """Best-effort short age label from ISO-ish ts."""
+    if not ts:
+        return ""
+    try:
+        raw = ts.strip().replace("Z", "+00:00")
+        if "T" not in raw and " " in raw:
+            raw = raw.replace(" ", "T", 1)
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        sec = max(0, int((datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()))
+        if sec < 90:
+            return "now"
+        if sec < 3600:
+            return f"{sec // 60}m"
+        if sec < 86400:
+            return f"{sec // 3600}h"
+        return f"{sec // 86400}d"
+    except (TypeError, ValueError):
+        return ""
+
+
 def format_fleet_body(
     snaps: list[dict[str, Any]],
     *,
@@ -475,17 +529,22 @@ def format_fleet_body(
     leader: str,
     title_override: Optional[str] = None,
 ) -> tuple[str, str, dict[str, Any]]:
-    """One compact fleet card for Telegram (daily digest or live ops dashboard)."""
+    """True ops **dashboard** card (not a log dump) for sticky Telegram UI.
+
+    Layout (top → bottom):
+      1) KPI strip — hosts / injected / farmed / errors
+      2) LIVE — last batch events (compact, no key=value soup)
+      3) HOSTS — status lights + inj + JWT + proxy count
+      4) PROXY — fleet pool health + top fail classes + worst sample
+    Soft inventory noise (needs_relogin) is collapsed, not a wall of text.
+    """
     title = title_override or f"Ops dashboard · {date_key}"
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
     present = sorted({str(s.get("host") or "?") for s in snaps})
-    lines: list[str] = [
-        f"ts={ts} refreshed_by={leader}",
-        f"hosts={len(present)}/{len(expected) if expected else len(present)} "
-        f"present={','.join(present) if present else '(none)'}",
-    ]
-    if missing:
-        lines.append(f"missing={','.join(missing)}")
+    n_exp = len(expected) if expected else len(present)
+    n_ok_hosts = sum(1 for s in snaps if _host_status_dot(s) == "🟢")
+    n_warn = sum(1 for s in snaps if _host_status_dot(s) == "🟡")
+    n_bad = sum(1 for s in snaps if _host_status_dot(s) == "🔴")
 
     total_inj = 0
     total_farmed = 0
@@ -493,11 +552,40 @@ def format_fleet_body(
     total_soft_skip = 0
     total_disabled = 0
     total_tracked = 0
+    total_proxy_file = 0
     reason_counts: Counter[str] = Counter()
     batch_ok = 0
     batch_fail = 0
 
-    # Recent batch events (newest first) — per-batch sticky updates
+    for s in snaps:
+        acc = s.get("accounts") or {}
+        total_inj += int(acc.get("injected") or 0)
+        total_farmed += int(acc.get("farmed") or 0)
+        total_err += int(acc.get("error") or 0)
+        px = s.get("proxy") or {}
+        total_soft_skip += int(px.get("soft_skip") or 0)
+        total_disabled += int(px.get("disabled") or 0)
+        total_tracked += int(px.get("tracked") or 0)
+        total_proxy_file += int(px.get("file") or 0)
+        for k, v in (px.get("fail_reasons") or {}).items():
+            try:
+                reason_counts[str(k)] += int(v)
+            except (TypeError, ValueError):
+                reason_counts[str(k)] += 1
+
+    # --- KPI strip (dashboard header) ---
+    host_chip = f"{len(present)}/{n_exp}"
+    if missing:
+        host_chip += f" · ⚠ missing {','.join(missing)}"
+    lines: list[str] = [
+        "FLEET:",
+        f"  • 🖥️ Hosts  {host_chip}   🟢{n_ok_hosts}  🟡{n_warn}  🔴{n_bad}",
+        f"  • 💉 Injected  {total_inj}     🌾 Farmed  {total_farmed}     ❌ Error  {total_err}",
+        f"  • 🌐 Proxy pool  ~{total_proxy_file // max(1, len(snaps))}/host  · tracked {total_tracked}  · skip {total_soft_skip}  · off {total_disabled}",
+        f"  • ⏱ {ts}  ·  refresh {leader}",
+    ]
+
+    # --- LIVE events (newest first) ---
     events: list[tuple[str, dict[str, Any], str]] = []
     for s in snaps:
         h = str(s.get("host") or "?")
@@ -506,29 +594,43 @@ def format_fleet_body(
             events.append((str(le.get("ts") or s.get("ts_utc") or ""), le, h))
     events.sort(key=lambda x: x[0], reverse=True)
     if events:
-        lines.append("LAST EVENTS:")
-        for _ts, le, h in events[:8]:
-            kind = le.get("kind") or "?"
+        lines.append("LIVE:")
+        for ets, le, h in events[:6]:
+            kind = str(le.get("kind") or "event")
             ok_n = int(le.get("ok") or 0)
             fail_n = int(le.get("fail") or 0)
             batch_ok += ok_n
             batch_fail += fail_n
-            lvl = le.get("level") or ""
-            bid = le.get("batch_id") or le.get("title") or ""
-            detail = f" ok={ok_n} fail={fail_n}"
-            if bid:
-                detail += f" {bid}"
-            if le.get("fail_class"):
-                detail += f" class={le.get('fail_class')}"
-            # compact email sample (no JWT)
+            icon = _kind_icon(kind)
+            age = _rel_age(ets)
+            age_s = f" · {age}" if age else ""
+            # status for this event
+            if fail_n and not ok_n:
+                mark = "🔴"
+            elif fail_n and ok_n:
+                mark = "🟡"
+            else:
+                mark = "🟢"
+            score = f"+{ok_n}" if ok_n else "0"
+            if fail_n:
+                score += f" / −{fail_n}"
+            label = kind.replace("_", " ")
+            lines.append(f"  • {mark} {icon} <b>{h}</b>  {label}  {score}{age_s}")
+            # emails as nested clean list (max 3) — no JWT
             emails = le.get("ok_emails") or le.get("emails") or []
+            fail_emails = le.get("fail_emails") or []
             if isinstance(emails, list) and emails:
-                sample = ",".join(str(e) for e in emails[:3])
+                for em in emails[:3]:
+                    lines.append(f"      ✓ {em}")
                 if len(emails) > 3:
-                    sample += f"+{len(emails) - 3}"
-                detail += f" [{sample}]"
-            lines.append(f"  • [{h}] {kind}{detail}" + (f" ({lvl})" if lvl else ""))
+                    lines.append(f"      … +{len(emails) - 3} more")
+            if isinstance(fail_emails, list) and fail_emails:
+                for em in fail_emails[:2]:
+                    lines.append(f"      ✗ {em}")
+            if le.get("fail_class") and fail_n:
+                lines.append(f"      class: {le.get('fail_class')}")
 
+    # --- HOST board ---
     lines.append("HOSTS:")
     for s in sorted(snaps, key=lambda x: str(x.get("host") or "")):
         h = s.get("host") or "?"
@@ -536,65 +638,68 @@ def format_fleet_body(
         inj = int(acc.get("injected") or 0)
         farmed = int(acc.get("farmed") or 0)
         err = int(acc.get("error") or 0)
-        total_inj += inj
-        total_farmed += farmed
-        total_err += err
         px = s.get("proxy") or {}
-        total_soft_skip += int(px.get("soft_skip") or 0)
-        total_disabled += int(px.get("disabled") or 0)
-        total_tracked += int(px.get("tracked") or 0)
-        for k, v in (px.get("fail_reasons") or {}).items():
-            try:
-                reason_counts[str(k)] += int(v)
-            except (TypeError, ValueError):
-                reason_counts[str(k)] += 1
         hard = s.get("issues_hard") or []
         soft = s.get("issues_soft") or []
-        flag = ""
-        if hard:
-            flag = " ⚠HARD"
-        elif soft:
-            flag = " ·soft"
-        lines.append(
-            f"  • {h}: farmer={s.get('farmer')} exit={s.get('health_rc')} "
-            f"inj={inj} farmed={farmed} err={err} "
-            f"proxy file={px.get('file')} skip={px.get('soft_skip')} "
-            f"dis={px.get('disabled')} jwt_ok={s.get('jwt_ok_pct')}%{flag}"
+        # collapse soft inventory noise — show count only, not full list
+        soft_noise = [x for x in soft if str(x) in ("needs_relogin", "many_expired_tokens")]
+        soft_ops = [x for x in soft if x not in soft_noise]
+        jwt = s.get("jwt_ok_pct")
+        jwt_s = f"{jwt}%" if jwt is not None and jwt != "" else "—"
+        farmer = str(s.get("farmer") or "?")
+        farmer_short = "on" if farmer == "active" else farmer
+        dot = _host_status_dot(s)
+        # one clean row
+        row = (
+            f"  • {dot} <b>{h}</b>  "
+            f"inj {inj}  farmed {farmed}  err {err}  "
+            f"JWT {jwt_s}  proxy {px.get('file') or 0}  · {farmer_short}"
         )
+        lines.append(row)
         if hard:
-            lines.append(f"      hard={','.join(str(x) for x in hard[:6])}")
-        if soft:
-            lines.append(f"      soft={','.join(str(x) for x in soft[:6])}")
+            lines.append(f"      🔴 hard: {', '.join(str(x) for x in hard[:4])}")
+        if soft_ops:
+            lines.append(f"      🟡 {', '.join(str(x) for x in soft_ops[:4])}")
+        elif soft_noise and not hard:
+            # one quiet chip instead of dumping needs_relogin walls
+            lines.append(f"      · soft inventory ({len(soft_noise)})")
 
-    lines.append("FLEET TOTALS:")
-    lines.append(
-        f"injected={total_inj} farmed={total_farmed} error={total_err} | "
-        f"proxy tracked={total_tracked} soft_skip={total_soft_skip} "
-        f"disabled={total_disabled}"
-    )
+    # --- PROXY board ---
+    lines.append("PROXY:")
     if reason_counts:
-        rbits = ", ".join(f"{k}={v}" for k, v in reason_counts.most_common(8))
-        lines.append(f"fail_reasons: {rbits}")
-
-    # Compact worst proxies across fleet (redacted already)
-    worst_lines: list[str] = []
+        top_r = " · ".join(f"{k} {v}" for k, v in reason_counts.most_common(5))
+        lines.append(f"  • fail classes: {top_r}")
+    else:
+        lines.append("  • fail classes: (none yet)")
+    worst_rows: list[str] = []
     for s in snaps:
         h = s.get("host") or "?"
         for p in (s.get("proxy") or {}).get("worst") or []:
-            worst_lines.append(f"  • [{h}] {_fmt_proxy_line(p).strip()}")
-    if worst_lines:
-        lines.append(f"WORST proxies (sample {min(6, len(worst_lines))}):")
-        lines.extend(worst_lines[:6])
+            if int(p.get("fail") or 0) <= 0 and not p.get("disabled") and not p.get("soft_skip"):
+                continue
+            flag = "⛔" if p.get("disabled") else ("⏸" if p.get("soft_skip") else "·")
+            reason = p.get("last_fail_reason") or ""
+            rpart = f" · {reason}" if reason else ""
+            worst_rows.append(
+                f"  • {flag} [{h}] score {p.get('score')}  "
+                f"{p.get('ok')}/{p.get('fail')}  {p.get('proxy')}{rpart}"
+            )
+    if worst_rows:
+        lines.append(f"  • worst ({min(4, len(worst_rows))}):")
+        lines.extend(worst_rows[:4])
 
-    lines.append("note: single sticky card · soft inventory · no reauth · no gateway DELETE")
+    # Footer one line only — not a log wall
+    lines.append("1 sticky card · inventory only")
     body = "\n".join(lines)
-    # Telegram body cap handled in alerts; keep under ~3500 here if huge
     if len(body) > 3400:
         body = body[:3350] + "\n…(truncated)"
+
     extra: dict[str, Any] = {
-        "host": "fleet",
+        "dashboard": True,  # clean UI renderer (no key=value meta dump)
         "ok": batch_ok if (batch_ok or batch_fail) else total_inj,
         "fail": batch_fail if (batch_ok or batch_fail) else (total_farmed + total_err),
+        "injected": total_inj,
+        "hosts": f"{len(present)}/{n_exp}",
         "hosts_present": present,
         "hosts_missing": missing,
     }
