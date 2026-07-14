@@ -1,7 +1,8 @@
 # Migration Playbook — VPS Death / Rebuild
 
 **Audience:** on-call / operator  
-**Last proven:** 2026-07-13 — old CSA `152.42.242.192` suspended → new host `168.144.137.240` (hostname `grok`) full E2E restore  
+**Last proven:** 2026-07-14 — multi-VPS DO fleet (grok3–grok6) with age/S3 per-host prefixes; CSA `168.144.137.240` **retired**  
+**Historical:** 2026-07-13 — old CSA `152.42.242.192` → `168.144.137.240` (now retired)  
 **RTO target:** < 45 min with age backup; < 90 min rebuild from 9router only  
 **RPO:** last successful inject to 9router (tokens live on gateway even if farm disk is gone)
 
@@ -27,18 +28,19 @@ Related: [DEPLOYMENT.md](./DEPLOYMENT.md) · [RUNBOOK.md](./RUNBOOK.md) R16 · [
 
 ## 1. Live production map (update when host changes)
 
-| Role | Current (2026-07-13) | Notes |
+| Role | Current (2026-07-14) | Notes |
 |------|----------------------|--------|
-| Farm VPS | **`168.144.137.240`** alias SSH `csa` | Ubuntu 24.04, 4c/8GB, SG, hostname `grok` |
+| Farm fleet | **grok4** `157.245.49.4` · **grok3** `143.198.86.242` · **grok5** `206.189.37.233` · **grok6** `174.138.24.143` | DO SGP1; 8G concurrent 2 (grok5 trial 3); grok6 4G light concurrent 1 |
 | Farm user | `magadirxwin` (non-root) | Camoufox **must not** run as root |
-| App dir | `/home/magadirxwin/grok-farm` | |
-| DB | `~/grok-farm/akun.db` mode **600** | |
+| App dir | `/home/magadirxwin/grok-farm` | per host |
+| DB | `~/grok-farm/akun.db` mode **600** | **per-host** (not shared) |
 | Gateway | `49.12.82.34` SSH port **39999** | 9router Pro; API often `:20128` |
 | Proxy SoT | 9router **`proxyPools`** | Sync → `usa_proxies.txt` |
+| Backup S3 | `s3://grok-farm/farm-vps/grok{N}/…` | age encrypt; `backup.env` per host |
 | Domains | `budgezen.com` + `mypapyr.com` | Pattern B → two Gmails |
-| Code pin | tag **`v2.2.0`+** / `main` | Prefer release tag |
+| Code pin | tag **`v2.3.0`+** / `main` | Prefer release tag |
 
-Old dead host (do not target): `152.42.242.192` (`csa-old`).
+Retired / do not target as production: CSA `168.144.137.240`, old `152.42.242.192` (`csa-old`).
 
 ---
 
@@ -438,7 +440,7 @@ See OPERATIONS § Auto import/inject (brutal v5).
 |------|--------|
 | Endpoint | `https://is3.cloudhost.id` |
 | Bucket | `grok-farm` |
-| Prefix (live) | `farm-vps/csa/grok/` (hostname short name) |
+| Prefix (live) | `farm-vps/grok{N}/` per host (e.g. `farm-vps/grok4`); archive path may include hostname segment |
 | Objects | dated `*.tgz.age`, `latest.tgz.age`, `LATEST.txt` |
 | Secrets file | `~/.config/grok-farm/backup.env` (mode **600**, farmer user only) |
 | Encrypt | `BACKUP_ENCRYPT=age` + `~/.config/grok-farm/age.pubkey` |
@@ -469,7 +471,7 @@ When `backup.env` is missing:
 
 Requires `~/.config/grok-farm/age.pubkey` (farmer) and identity offline for decrypt.
 
-**Enable S3:** write `~/.config/grok-farm/backup.env` (600) with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_BUCKET=grok-farm`, `S3_PREFIX=farm-vps/csa`, `BACKUP_ENCRYPT=age`; install `boto3` in farm `.venv`; next timer run uploads offsite.
+**Enable S3:** write `~/.config/grok-farm/backup.env` (600) with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_BUCKET=grok-farm`, `S3_PREFIX=farm-vps/grokN` (match host tag), `BACKUP_ENCRYPT=age`; install `boto3` in farm `.venv`; next timer run uploads offsite.
 
 ---
 

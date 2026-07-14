@@ -15,8 +15,9 @@
 | [SECURITY.md](./SECURITY.md) | Security | Secrets, age, least privilege |
 
 **Repo:** private `fazulfi/grok-farm`  
-**Code pin:** `v2.2.2`+ / `main`  
-**Live farm (update when moved):** `168.144.137.240` · user `magadirxwin` · gateway `49.12.82.34:39999`
+**Code pin:** `v2.3.0`+ / `main`  
+**Live fleet (update when moved):** grok4 `157.245.49.4` · grok3 `143.198.86.242` · grok5 `206.189.37.233` · grok6 `174.138.24.143` · user `magadirxwin` · gateway `49.12.82.34:39999`  
+**Retired:** CSA `168.144.137.240` (2026-07-14)
 ### Quick DR
 
 1. Open **[MIGRATION.md](./MIGRATION.md)**  

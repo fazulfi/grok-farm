@@ -306,9 +306,12 @@ git fetch --tags && git checkout main   # or newer tag when released
 
 | Host | IP | User | Notes |
 |------|-----|------|-------|
-| CSA (legacy) | `168.144.137.240` | `magadirxwin` | may be down |
-| grok4 / grok3 / grok5 | `157.245.49.4` / `143.198.86.242` / `206.189.37.233` | `magadirxwin` | DO multi-VPS fleet; concurrent 2 |
+| grok4 | `157.245.49.4` | `magadirxwin` | 8G · concurrent 2 · mid-drain 120s · S3 `farm-vps/grok4` |
+| grok3 | `143.198.86.242` | `magadirxwin` | 8G · concurrent 2 · S3 `farm-vps/grok3` |
+| grok5 | `206.189.37.233` | `magadirxwin` | 8G · concurrent 2–3 trial · S3 `farm-vps/grok5` |
+| grok6 | `174.138.24.143` | `magadirxwin` | **4G light** · concurrent 1 · S3 `farm-vps/grok6` |
 | Gateway | `49.12.82.34:39999` | root (SSH) | proxyPools + inject |
+| ~~CSA~~ | `168.144.137.240` | — | **retired** 2026-07-14 |
 
 Multi-VPS sizing + mid-drain rules: [CAPACITY.md](./CAPACITY.md) §6.2. Agent host map: `AGENTS.md` §3 / §9.
 
