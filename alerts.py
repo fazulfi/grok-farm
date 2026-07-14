@@ -151,22 +151,31 @@ def _send_webhook(url: str, content: str, safe_title: str, safe_body: str, level
     return _post_json(url, payload)
 
 
-def send_alert(title: str, body: str = "", level: str = "info", extra: Optional[dict[str, Any]] = None) -> bool:
+def send_alert(
+    title: str,
+    body: str = "",
+    level: str = "info",
+    extra: Optional[dict[str, Any]] = None,
+    *,
+    skip_debounce: bool = False,
+) -> bool:
     """
     Fire alert if Telegram (token+chat_id) and/or GROK_ALERT_WEBHOOK is set.
     Discord: expects {"content": "..."}.
     Telegram: Bot API sendMessage (GROK_TELEGRAM_BOT_TOKEN + GROK_TELEGRAM_CHAT_ID).
     Never includes raw JWTs — body is redacted. Never logs bot token.
     Debounce: GROK_ALERT_DEBOUNCE_MIN (default 60) minutes per title+issues fingerprint.
+    Per-batch farm/inject detail should pass skip_debounce=True so each batch notifies.
     """
     url = webhook_url()
     has_tg = bool(telegram_bot_token() and telegram_chat_id())
     if not url and not has_tg:
         return False
-    if not _should_send(title, body, level, extra):
+    if not skip_debounce and not _should_send(title, body, level, extra):
         return False
     safe_title = redact(title)[:200]
-    safe_body = redact(body)[:1800]
+    # Larger body for account lists (Telegram hard-capped at 4000 in _send_telegram)
+    safe_body = redact(body)[:3500]
     content = f"**[{level.upper()}] Grok Farm — {safe_title}**\n{safe_body}".strip()
     # Prefer Telegram plain text (no markdown required)
     tg_text = f"[{level.upper()}] Grok Farm — {safe_title}\n{safe_body}".strip()
@@ -177,3 +186,15 @@ def send_alert(title: str, body: str = "", level: str = "info", extra: Optional[
     if url:
         sent = _send_webhook(url, content, safe_title, safe_body, level, extra) or sent
     return sent
+
+
+def format_email_list(emails: list[str] | set[str], *, limit: int = 40) -> str:
+    """Format emails for alert body (no tokens/passwords). Caps length."""
+    items = sorted({str(e).strip() for e in emails if str(e).strip()})
+    if not items:
+        return "(none)"
+    shown = items[:limit]
+    lines = "\n".join(f"  • {e}" for e in shown)
+    if len(items) > limit:
+        lines += f"\n  … +{len(items) - limit} more"
+    return lines
