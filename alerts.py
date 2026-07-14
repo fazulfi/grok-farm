@@ -250,7 +250,140 @@ def sticky_state_path(name: str = "fleet_digest") -> Path:
     return base / f"telegram_sticky_{safe}.json"
 
 
+def _sticky_safe_name(name: str = "fleet_digest") -> str:
+    return re.sub(r"[^a-zA-Z0-9._-]+", "_", (name or "fleet_digest").strip()) or "fleet"
+
+
+def sticky_s3_key(name: str = "fleet_digest") -> str:
+    """Shared S3 key so any fleet host can edit the same Telegram card.
+
+    Default: farm-vps/fleet-digest/sticky_fleet_digest.json (not date-scoped).
+    Override with GROK_OPS_DASHBOARD_STICKY_S3_KEY (full key under bucket).
+    """
+    override = (os.environ.get("GROK_OPS_DASHBOARD_STICKY_S3_KEY") or "").strip()
+    if override:
+        return override.lstrip("/")
+    base = (os.environ.get("GROK_FLEET_DIGEST_PREFIX") or "farm-vps/fleet-digest").strip().strip("/")
+    return f"{base}/sticky_{_sticky_safe_name(name)}.json"
+
+
+def _load_backup_env_for_sticky() -> bool:
+    """Load ~/.config/grok-farm/backup.env for S3 sticky (no secret logging)."""
+    path = Path(
+        os.path.expanduser(
+            os.environ.get("GROK_BACKUP_ENV") or "~/.config/grok-farm/backup.env"
+        )
+    )
+    if not path.is_file():
+        return False
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+        return True
+    except OSError:
+        return False
+
+
+def sticky_s3_ready() -> bool:
+    """True when S3 creds available for shared sticky message_id."""
+    raw = (os.environ.get("GROK_OPS_DASHBOARD_S3_STICKY") or "1").strip().lower()
+    if raw in ("0", "false", "off", "no"):
+        return False
+    _load_backup_env_for_sticky()
+    need = ("S3_ENDPOINT", "S3_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+    return all((os.environ.get(k) or "").strip() for k in need)
+
+
+def _s3_sticky_client():
+    import boto3
+    from botocore.client import Config
+
+    return boto3.client(
+        "s3",
+        endpoint_url=os.environ["S3_ENDPOINT"],
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        ),
+    )
+
+
+def load_sticky_message_id_s3(name: str = "fleet_digest") -> Optional[int]:
+    """Load sticky message_id from S3 (fleet-shared). Never logs secrets."""
+    if not sticky_s3_ready():
+        return None
+    try:
+        client = _s3_sticky_client()
+        bucket = os.environ["S3_BUCKET"]
+        key = sticky_s3_key(name)
+        raw = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            return None
+        mid = data.get("message_id")
+        if mid is None:
+            return None
+        return int(mid)
+    except Exception:
+        # missing key / network — fail-open to local
+        return None
+
+
+def save_sticky_message_id_s3(
+    message_id: int,
+    name: str = "fleet_digest",
+    *,
+    chat_id: str = "",
+) -> bool:
+    """Persist sticky mid to S3 so peer hosts can edit the same card."""
+    if not sticky_s3_ready():
+        return False
+    try:
+        client = _s3_sticky_client()
+        bucket = os.environ["S3_BUCKET"]
+        key = sticky_s3_key(name)
+        payload = {
+            "message_id": int(message_id),
+            "chat_id": str(chat_id or telegram_chat_id() or ""),
+            "updated_at": int(time.time()),
+            "name": name,
+            "schema": 1,
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        client.put_object(Bucket=bucket, Key=key, Body=body, ContentLength=len(body))
+        return True
+    except Exception as e:
+        print(f"[ALERT] sticky S3 save failed: {redact(e)}", flush=True)
+        return False
+
+
+def clear_sticky_message_id_s3(name: str = "fleet_digest") -> None:
+    if not sticky_s3_ready():
+        return
+    try:
+        client = _s3_sticky_client()
+        client.delete_object(Bucket=os.environ["S3_BUCKET"], Key=sticky_s3_key(name))
+    except Exception:
+        pass
+
+
 def load_sticky_message_id(name: str = "fleet_digest") -> Optional[int]:
+    """Prefer S3 shared mid (multi-host dashboard), then local file."""
+    mid = load_sticky_message_id_s3(name)
+    if mid is not None:
+        return mid
     path = sticky_state_path(name)
     try:
         if not path.is_file():
@@ -270,6 +403,7 @@ def save_sticky_message_id(
     *,
     chat_id: str = "",
 ) -> None:
+    """Save sticky mid locally and to S3 (best-effort)."""
     path = sticky_state_path(name)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,6 +420,7 @@ def save_sticky_message_id(
             pass
     except OSError as e:
         print(f"[ALERT] sticky state save failed: {redact(e)}", flush=True)
+    save_sticky_message_id_s3(message_id, name, chat_id=chat_id)
 
 
 def clear_sticky_message_id(name: str = "fleet_digest") -> None:
@@ -295,6 +430,7 @@ def clear_sticky_message_id(name: str = "fleet_digest") -> None:
             path.unlink()
     except OSError:
         pass
+    clear_sticky_message_id_s3(name)
 
 
 def format_email_list(
