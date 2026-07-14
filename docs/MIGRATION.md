@@ -440,7 +440,7 @@ See OPERATIONS § Auto import/inject (brutal v5).
 |------|--------|
 | Endpoint | `https://is3.cloudhost.id` |
 | Bucket | `grok-farm` |
-| Prefix (live) | `farm-vps/grok{N}/` per host (e.g. `farm-vps/grok4`); archive path may include hostname segment |
+| Prefix (live) | `farm-vps/grok{N}/` per host (e.g. `farm-vps/grok4`); script does **not** append host again when `S3_PREFIX` already ends with host key |
 | Objects | dated `*.tgz.age`, `latest.tgz.age`, `LATEST.txt` |
 | Secrets file | `~/.config/grok-farm/backup.env` (mode **600**, farmer user only) |
 | Encrypt | `BACKUP_ENCRYPT=age` + `~/.config/grok-farm/age.pubkey` |

@@ -406,13 +406,15 @@ Retention: operator policy (disk is cheap; tokens are sensitive — encrypt back
 ```bash
 # Requires: age, backup.env, age.pubkey or AGE_RECIPIENT
 ~/grok-farm/scripts/s3_backup.sh
-# → s3://BUCKET/PREFIX/HOST/DATE/grok-farm-HOST-STAMP.tgz.age
+# → s3://BUCKET/HOST_ROOT/DATE/grok-farm-HOST-STAMP.tgz.age
+# HOST_ROOT = S3_PREFIX if it already ends with host key (e.g. farm-vps/grok4),
+# else S3_PREFIX/HOST (e.g. farm-vps + grok4 → farm-vps/grok4). No double host.
 # → .../latest.tgz.age + LATEST.txt
 # then: s3_upload.py --retention (boto3; RETENTION_DAYS default 14)
 # log: ~/grok-farm/logs/s3_backup.log
 ```
 
-Retention keeps `latest.tgz.age` + `LATEST.txt`; deletes dated objects older than `RETENTION_DAYS` under `S3_PREFIX/HOST/`. Manual:
+Retention keeps `latest.tgz.age` + `LATEST.txt`; deletes dated objects older than `RETENTION_DAYS` under host root (`farm-vps/grokN/`). Manual:
 
 ```bash
 set -a; source ~/.config/grok-farm/backup.env; set +a

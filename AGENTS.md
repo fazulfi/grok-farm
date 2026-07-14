@@ -7,7 +7,7 @@
 | Field | Value |
 |-------|--------|
 | **Project** | Grok Farm — autofarm + auto-inject into 9router (not session management) |
-| **Version** | 2.3.0 (see `CHANGELOG.md`) |
+| **Version** | 2.3.1 (see `CHANGELOG.md`) |
 | **Operator** | Faiz |
 | **Runtime** | Ubuntu VPS · systemd · Camoufox · SQLite · optional 9router |
 | **Repo** | Private GitHub `fazulfi/grok-farm` |
