@@ -3111,6 +3111,100 @@ async def save_failed_to_file(attempt: int, email: str, error: str):
         FAILED_JSON.write_text(json.dumps(rows, indent=2))
 
 
+def _send_farm_batch_alert(
+    *,
+    created: int,
+    failed: int,
+    elapsed_s: int,
+    batch_id: str,
+    batch_dir: Path,
+    results_json: Path,
+    failed_json: Path,
+) -> None:
+    """
+    End-of-batch farm alert with full account detail (emails + fail reasons).
+    Never includes password / access_token / refresh_token (S7).
+    skip_debounce so each batch notifies; HUD remains primary UI.
+    """
+    try:
+        from alerts import format_email_list, send_alert
+    except ImportError:
+        return
+
+    import socket
+
+    host = socket.gethostname()
+    ok_emails: list[str] = []
+    if results_json.is_file():
+        try:
+            rows = json.loads(results_json.read_text(encoding="utf-8"))
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict) and row.get("email"):
+                        ok_emails.append(str(row["email"]))
+        except Exception:
+            pass
+
+    fail_lines: list[str] = []
+    if failed_json.is_file():
+        try:
+            frows = json.loads(failed_json.read_text(encoding="utf-8"))
+            if isinstance(frows, list):
+                for row in frows:
+                    if not isinstance(row, dict):
+                        continue
+                    em = str(row.get("email") or "").strip() or f"attempt#{row.get('attempt', '?')}"
+                    err = str(row.get("error") or "unknown")[:120]
+                    fail_lines.append(f"  • {em} — {err}")
+        except Exception:
+            pass
+
+    if failed and not created:
+        level = "critical"
+        title = "farm batch all failed"
+    elif failed:
+        level = "warning"
+        title = "farm batch partial"
+    elif created:
+        level = "info"
+        title = "farm batch ok"
+    else:
+        level = "warning"
+        title = "farm batch empty"
+
+    body_parts = [
+        f"host={host}",
+        f"batch={batch_id}",
+        f"created={created} failed={failed} elapsed={elapsed_s}s",
+        f"dir={batch_dir}",
+        "",
+        f"OK accounts ({len(ok_emails)}):",
+        format_email_list(ok_emails),
+    ]
+    if fail_lines:
+        body_parts.append("")
+        body_parts.append(f"FAILED ({len(fail_lines)}):")
+        # cap fail detail lines
+        shown = fail_lines[:40]
+        body_parts.extend(shown)
+        if len(fail_lines) > 40:
+            body_parts.append(f"  … +{len(fail_lines) - 40} more")
+
+    send_alert(
+        title,
+        "\n".join(body_parts),
+        level=level,
+        extra={
+            "host": host,
+            "batch_id": batch_id,
+            "created": created,
+            "failed": failed,
+            "ok_emails": ok_emails[:50],
+        },
+        skip_debounce=True,
+    )
+
+
 def _prompt_int(label: str, default: int, *, min_v: int = 1, max_v: int = 1000) -> int:
     """Ask user for an int; Enter keeps default from .env."""
     while True:
@@ -3325,6 +3419,7 @@ async def main():
         HUD.close_log()
 
     # finalize batch meta
+    elapsed_s = int(time.time() - start)
     try:
         meta_path = BATCH_DIR / "batch_meta.json"
         meta = {}
@@ -3334,14 +3429,14 @@ async def main():
             "finished_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "created": created,
             "failed": failed,
-            "elapsed_s": int(time.time() - start),
+            "elapsed_s": elapsed_s,
         })
         meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
 
     print("=" * 60, flush=True)
-    print(f"  DONE: {created} created, {failed} failed in {int(time.time() - start)}s", flush=True)
+    print(f"  DONE: {created} created, {failed} failed in {elapsed_s}s", flush=True)
     print(f"  Batch: {BATCH_ID}", flush=True)
     print(f"  Dir  : {BATCH_DIR}", flush=True)
     print(f"  JSON : {RESULTS_JSON}", flush=True)
@@ -3349,6 +3444,21 @@ async def main():
     print(f"  Log  : {log_path}", flush=True)
     print(f"  Used : {USED_EMAILS_FILE}", flush=True)
     print("=" * 60, flush=True)
+
+    # Per-batch Telegram/webhook: account emails + fail reasons (never JWT/password).
+    # HUD remains primary UI; this is ops channel for remote fleet.
+    try:
+        _send_farm_batch_alert(
+            created=created,
+            failed=failed,
+            elapsed_s=elapsed_s,
+            batch_id=str(BATCH_ID or ""),
+            batch_dir=BATCH_DIR,
+            results_json=RESULTS_JSON,
+            failed_json=FAILED_JSON,
+        )
+    except Exception as _alert_exc:
+        print(f"[ALERT] farm batch notify error: {_alert_exc}", flush=True)
 
 
 if __name__ == "__main__":
