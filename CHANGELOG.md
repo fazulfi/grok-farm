@@ -22,6 +22,12 @@ All notable changes to Grok Farm are documented here.
 - **Telegram rich HTML cards:** `alerts.py` uses `parse_mode=HTML` with
   emoji level header, bold title, key=value chips, `<code>` emails; plain
   fallback if entities rejected; Discord keeps markdown; auto-load `.env`
+- **Telegram message effects + denser cards:** private-chat
+  `message_effect_id` by level using **free** effects only (🎉 party success /
+  👍 thumbs info / 🔥 fire warn+crit+error — Premium-only IDs rejected);
+  HTML `<blockquote>` meta strip, section emoji banners, unicode status bar;
+  farm/inject ok level=`success`; `GROK_TELEGRAM_EFFECTS=0` to disable;
+  effect stripped automatically if API rejects
 
 ### Changed
 
