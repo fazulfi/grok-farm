@@ -4,6 +4,13 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-VPS farmer fleet docs:** live inventory for DO hosts grok4/grok3/grok5
+  (+ legacy CSA) in `AGENTS.md` §3/§9, `docs/CAPACITY.md` §6.2,
+  `docs/OPERATIONS.md` §1, `docs/DEPLOYMENT.md` §8 — concurrent 2, mid-drain
+  on one host only, key-only SSH, off-box farmer key backup for trial VPS
+
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
