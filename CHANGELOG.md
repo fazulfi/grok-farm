@@ -4,6 +4,17 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Daily digest + proxy dashboard (Telegram):** `daily_digest.py` +
+  `scripts/daily_digest.sh` + `systemd/grok-farm-digest.{service,timer}`
+  (~01:00 UTC + ≤20m random). Each host posts one HTML card with health
+  inventory (farmer, accounts, JWT/soft probe, disk, backup, hard/soft issues)
+  and **proxy dashboard** (file lines, soft-skip/disabled counts, fail_reason
+  taxonomy, top/worst redacted proxies, domain_stats). Manual:
+  `python daily_digest.py` / `--proxy-only` / `--dry-run`. `skip_debounce=True`;
+  no JWT/password; zero ban risk (inventory only). Deploy installs digest timer.
+
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /

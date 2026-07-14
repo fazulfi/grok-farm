@@ -112,6 +112,8 @@ Optional channels (either or both). Wired in:
   `check_status` **hard** exit **3** / unexpected failure only (soft exit **2** is
   log-only). Debounced via `GROK_ALERT_DEBOUNCE_MIN` (default 60 min;
   `logs/alert_debounce/`).
+- **`daily_digest.py`** via `grok-farm-digest.timer` — daily health + proxy
+  dashboard HTML card (`skip_debounce`); proxy keys redacted; **no** JWT/password.
 
 | Channel | Env | Notes |
 |---------|-----|-------|
@@ -127,9 +129,10 @@ Optional channels (either or both). Wired in:
 # GROK_TELEGRAM_BOT_TOKEN=   # secret — chmod 600 .env
 # GROK_TELEGRAM_CHAT_ID=
 # GROK_ALERT_DEBOUNCE_MIN=60
+# GROK_HOST_TAG=grok4   # optional digest title label
 ```
 
-Bodies pass through `log_redact` (no full JWT / proxy user:pass / bot token). Health timer posts only hard issue codes + account counts (no tokens).
+Bodies pass through `log_redact` (no full JWT / proxy user:pass / bot token). Health timer posts only hard issue codes + account counts (no tokens). Digest posts redacted proxy keys + account counts only.
 
 ### Windows age CLI (operator laptop)
 
