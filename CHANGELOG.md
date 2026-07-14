@@ -4,6 +4,13 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **grok7 farmer host:** `157.245.199.70` (8G, concurrent **3**, mid-drain off,
+  batch prefix `g7`); age/S3 prefix `farm-vps/grok7`; fleet digest hosts list
+  includes grok7 (leader remains grok3). Inventory docs: AGENTS §3/§9,
+  CAPACITY §6.2, OPERATIONS, DEPLOYMENT, MIGRATION, docs/README.
+
 ### Planned
 
 - Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
