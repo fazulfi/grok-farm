@@ -74,9 +74,11 @@ install_unit systemd/grok-farm-reconcile.service grok-farm-reconcile.service
 install_unit systemd/grok-farm-reconcile.timer grok-farm-reconcile.timer
 install_unit systemd/grok-farm-mark-expired.service grok-farm-mark-expired.service
 install_unit systemd/grok-farm-mark-expired.timer grok-farm-mark-expired.timer
+install_unit systemd/grok-farm-digest.service grok-farm-digest.service
+install_unit systemd/grok-farm-digest.timer grok-farm-digest.timer
 sudo systemctl daemon-reload
 for t in grok-farm-backup.timer grok-farm-health.timer grok-farm-probe.timer \
-         grok-farm-reconcile.timer grok-farm-mark-expired.timer; do
+         grok-farm-reconcile.timer grok-farm-mark-expired.timer grok-farm-digest.timer; do
   if [[ -f "/etc/systemd/system/\$t" ]] || systemctl cat "\$t" &>/dev/null; then
     sudo systemctl enable --now "\$t" || true
   fi
@@ -85,4 +87,4 @@ echo "systemd units refreshed (farmer NOT restarted — run: sudo systemctl rest
 echo "OK deploy complete on \$(hostname)"
 EOF
 
-echo "Done. Next on VPS: edit .env if needed; farmer not auto-restarted. Health/backup/probe/reconcile/mark-expired timers enabled when units present."
+echo "Done. Next on VPS: edit .env if needed; farmer not auto-restarted. Health/backup/probe/reconcile/mark-expired/digest timers enabled when units present."
