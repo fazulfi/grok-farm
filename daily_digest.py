@@ -473,13 +473,14 @@ def format_fleet_body(
     expected: list[str],
     missing: list[str],
     leader: str,
+    title_override: Optional[str] = None,
 ) -> tuple[str, str, dict[str, Any]]:
-    """One compact fleet card for Telegram."""
-    title = f"Daily fleet digest · {date_key}"
+    """One compact fleet card for Telegram (daily digest or live ops dashboard)."""
+    title = title_override or f"Ops dashboard · {date_key}"
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     present = sorted({str(s.get("host") or "?") for s in snaps})
     lines: list[str] = [
-        f"ts={ts} leader={leader}",
+        f"ts={ts} refreshed_by={leader}",
         f"hosts={len(present)}/{len(expected) if expected else len(present)} "
         f"present={','.join(present) if present else '(none)'}",
     ]
@@ -493,6 +494,40 @@ def format_fleet_body(
     total_disabled = 0
     total_tracked = 0
     reason_counts: Counter[str] = Counter()
+    batch_ok = 0
+    batch_fail = 0
+
+    # Recent batch events (newest first) — per-batch sticky updates
+    events: list[tuple[str, dict[str, Any], str]] = []
+    for s in snaps:
+        h = str(s.get("host") or "?")
+        le = s.get("last_event")
+        if isinstance(le, dict) and le.get("kind"):
+            events.append((str(le.get("ts") or s.get("ts_utc") or ""), le, h))
+    events.sort(key=lambda x: x[0], reverse=True)
+    if events:
+        lines.append("LAST EVENTS:")
+        for _ts, le, h in events[:8]:
+            kind = le.get("kind") or "?"
+            ok_n = int(le.get("ok") or 0)
+            fail_n = int(le.get("fail") or 0)
+            batch_ok += ok_n
+            batch_fail += fail_n
+            lvl = le.get("level") or ""
+            bid = le.get("batch_id") or le.get("title") or ""
+            detail = f" ok={ok_n} fail={fail_n}"
+            if bid:
+                detail += f" {bid}"
+            if le.get("fail_class"):
+                detail += f" class={le.get('fail_class')}"
+            # compact email sample (no JWT)
+            emails = le.get("ok_emails") or le.get("emails") or []
+            if isinstance(emails, list) and emails:
+                sample = ",".join(str(e) for e in emails[:3])
+                if len(emails) > 3:
+                    sample += f"+{len(emails) - 3}"
+                detail += f" [{sample}]"
+            lines.append(f"  • [{h}] {kind}{detail}" + (f" ({lvl})" if lvl else ""))
 
     lines.append("HOSTS:")
     for s in sorted(snaps, key=lambda x: str(x.get("host") or "")):
@@ -548,22 +583,165 @@ def format_fleet_body(
         for p in (s.get("proxy") or {}).get("worst") or []:
             worst_lines.append(f"  • [{h}] {_fmt_proxy_line(p).strip()}")
     if worst_lines:
-        lines.append(f"WORST proxies (sample {min(8, len(worst_lines))}):")
-        lines.extend(worst_lines[:8])
+        lines.append(f"WORST proxies (sample {min(6, len(worst_lines))}):")
+        lines.extend(worst_lines[:6])
 
-    lines.append("note: soft inventory only — no reauth; no gateway DELETE")
+    lines.append("note: single sticky card · soft inventory · no reauth · no gateway DELETE")
     body = "\n".join(lines)
     # Telegram body cap handled in alerts; keep under ~3500 here if huge
     if len(body) > 3400:
         body = body[:3350] + "\n…(truncated)"
     extra: dict[str, Any] = {
         "host": "fleet",
-        "ok": total_inj,
-        "fail": total_farmed + total_err,
+        "ok": batch_ok if (batch_ok or batch_fail) else total_inj,
+        "fail": batch_fail if (batch_ok or batch_fail) else (total_farmed + total_err),
         "hosts_present": present,
         "hosts_missing": missing,
     }
     return title, body, extra
+
+
+def ops_dashboard_enabled() -> bool:
+    """GROK_OPS_DASHBOARD default on — single sticky fleet card updated per batch."""
+    raw = (os.environ.get("GROK_OPS_DASHBOARD") or "1").strip().lower()
+    return raw not in ("0", "false", "off", "no")
+
+
+def batch_alerts_enabled() -> bool:
+    """Per-batch new Telegram messages. Default OFF when ops dashboard on."""
+    raw = (os.environ.get("GROK_BATCH_ALERTS") or "").strip().lower()
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    if raw in ("0", "false", "off", "no"):
+        return False
+    # Default: suppress batch spam when dashboard is on
+    return not ops_dashboard_enabled()
+
+
+def sticky_name() -> str:
+    return (os.environ.get("GROK_OPS_DASHBOARD_STICKY_NAME") or "fleet_digest").strip() or "fleet_digest"
+
+
+def publish_ops_event(
+    event: dict[str, Any],
+    *,
+    refresh_telegram: bool = True,
+    wait_peers: bool = False,
+) -> bool:
+    """Upload host snapshot with last_event and refresh the single sticky dashboard.
+
+    Called after each farm/inject batch so Telegram shows one live-updating card
+    (editMessageText) instead of spamming new messages. Any host may edit when
+    sticky message_id is shared on S3.
+
+    event keys (all optional except kind): kind, ok, fail, level, batch_id,
+    title, fail_class, ok_emails (list, no JWT), fail_emails, note.
+    Never includes password/JWT. Returns True if sticky edit/send ok (or upload-only).
+    """
+    _load_env()
+    if not ops_dashboard_enabled():
+        return False
+    if not fleet_s3_ready():
+        print("[ops_dashboard] S3 not ready — skip sticky refresh", flush=True)
+        return False
+
+    host, health, health_rc, proxy, domains = collect_local(proxy_only=False)
+    date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    snapshot = build_local_snapshot(
+        host, health, health_rc, proxy, domains, proxy_only=False
+    )
+    # Attach last_event (redacted emails only)
+    kind = str(event.get("kind") or "event")
+    ok_emails = event.get("ok_emails") or event.get("emails") or []
+    if not isinstance(ok_emails, list):
+        ok_emails = []
+    fail_emails = event.get("fail_emails") or []
+    if not isinstance(fail_emails, list):
+        fail_emails = []
+    # Cap email samples (S7 — no tokens)
+    ok_emails = [str(e)[:120] for e in ok_emails[:12] if str(e).strip()]
+    fail_emails = [str(e)[:120] for e in fail_emails[:12] if str(e).strip()]
+    last_event: dict[str, Any] = {
+        "kind": kind,
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ok": int(event.get("ok") or 0),
+        "fail": int(event.get("fail") or 0),
+        "level": str(event.get("level") or "info"),
+        "batch_id": str(event.get("batch_id") or "")[:80],
+        "title": str(event.get("title") or kind)[:120],
+        "fail_class": str(event.get("fail_class") or "")[:80],
+        "ok_emails": ok_emails,
+        "fail_emails": fail_emails,
+        "note": str(event.get("note") or "")[:200],
+    }
+    snapshot["last_event"] = last_event
+    snapshot["schema"] = 2
+
+    try:
+        key = upload_fleet_snapshot(snapshot, date_key)
+        print(f"[ops_dashboard] uploaded s3://…/{key} event={kind}", flush=True)
+    except Exception as e:
+        print(f"[ops_dashboard] upload failed: {e}", flush=True)
+        return False
+
+    if not refresh_telegram:
+        return True
+
+    # Aggregate peers without long wait (per-batch must be fast)
+    wait_sec = 0
+    if wait_peers:
+        wait_sec = _env_int("GROK_FLEET_DIGEST_WAIT_SEC", 30)
+    expected = expected_hosts()
+    snaps_map: dict[str, dict[str, Any]] = {}
+    deadline = time.time() + wait_sec
+    while True:
+        try:
+            snaps_map = list_fleet_snapshots(date_key)
+        except Exception as e:
+            print(f"[ops_dashboard] list snapshots error: {e}", flush=True)
+            snaps_map = {host: snapshot}
+        snaps_map.setdefault(host, snapshot)
+        present = set(snaps_map.keys())
+        missing = [h for h in expected if h not in present]
+        if not missing or time.time() >= deadline or wait_sec <= 0:
+            break
+        time.sleep(min(5, max(1, int(deadline - time.time()))))
+
+    snaps = list(snaps_map.values())
+    missing = [h for h in expected if h not in snaps_map]
+    title, body, extra = format_fleet_body(
+        snaps,
+        date_key=date_key,
+        expected=expected,
+        missing=missing,
+        leader=host,
+        title_override=f"Ops dashboard · {date_key}",
+    )
+    level = pick_fleet_level(snaps)
+    # Prefer event level if worse than fleet health level
+    rank = {"success": 0, "info": 1, "warning": 2, "error": 3, "critical": 4}
+    ev_level = str(last_event.get("level") or "info")
+    if rank.get(ev_level, 0) > rank.get(level, 0):
+        level = ev_level
+
+    from alerts import send_or_edit_sticky
+
+    sticky = (os.environ.get("GROK_FLEET_DIGEST_STICKY") or "1").strip().lower()
+    force_new = sticky in ("0", "false", "off", "no")
+    ok = send_or_edit_sticky(
+        title,
+        body,
+        level=level,
+        extra=extra,
+        sticky_name=sticky_name(),
+        force_new=force_new,
+    )
+    print(
+        f"[ops_dashboard] sticky host={host} event={kind} level={level} "
+        f"hosts={len(snaps)} alert_sent={ok}",
+        flush=True,
+    )
+    return ok
 
 
 def _s3_client():
@@ -834,16 +1012,19 @@ def main() -> int:
         )
         level = pick_fleet_level(snaps)
         # Sticky live card: editMessageText same message_id (1 fleet card, updates in place)
+        # Use ops dashboard title when GROK_OPS_DASHBOARD=1 (single always-on card)
         from alerts import send_or_edit_sticky
 
         sticky = (os.environ.get("GROK_FLEET_DIGEST_STICKY") or "1").strip().lower()
         force_new = sticky in ("0", "false", "off", "no")
+        if ops_dashboard_enabled():
+            title = f"Ops dashboard · {date_key}"
         ok = send_or_edit_sticky(
             title,
             body,
             level=level,
             extra=extra,
-            sticky_name="fleet_digest",
+            sticky_name=sticky_name(),
             force_new=force_new,
         )
         print(
@@ -854,6 +1035,23 @@ def main() -> int:
         return 0 if ok else 2
 
     # ── Local single-host card ────────────────────────────────────────────
+    # When ops dashboard is on, still try sticky (local mid only if no S3)
+    if ops_dashboard_enabled():
+        from alerts import send_or_edit_sticky
+
+        ok = send_or_edit_sticky(
+            title_local,
+            body_local,
+            level=level_local,
+            extra=extra_local,
+            sticky_name=sticky_name(),
+        )
+        print(
+            f"[daily_digest] LOCAL sticky host={host} level={level_local} alert_sent={ok}",
+            flush=True,
+        )
+        return 0 if ok else 2
+
     from alerts import send_alert
 
     ok = send_alert(
