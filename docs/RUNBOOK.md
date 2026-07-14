@@ -628,26 +628,31 @@ injected rows and does not revoke gateway connections.
 
 ## R20 — Daily digest / proxy dashboard (Telegram)
 
-**Symptoms:** no daily Telegram card; proxy soft-skip invisible; want fleet
-summary without scrolling per-batch alerts.
+**Symptoms:** no daily Telegram card; four noisy host digests; proxy soft-skip
+invisible; want **one** fleet summary/day.
 
-**What it is:** each farmer posts **one** HTML card/day with:
+**What it is (v2.3.2+ fleet mode, default when `backup.env` present):**
 
-1. **Health** — farmer active, accounts (injected/farmed/error), JWT/soft probe
-   %, disk, backup status, hard/soft issues
-2. **Proxy dashboard** — local file line count, `proxy_stats` tracked /
-   soft-skip / disabled, fail_reason taxonomy, top + worst proxies (redacted),
-   domain_stats snapshot
+1. Every host builds a **redacted** snapshot (health + proxy dashboard) and
+   uploads to `s3://…/farm-vps/fleet-digest/YYYY-MM-DD/<host>.json`
+2. **Leader** host (default: first of `GROK_FLEET_DIGEST_HOSTS`, or
+   `GROK_FLEET_DIGEST_LEADER=1` / `GROK_FLEET_DIGEST_LEADER_HOST=`) waits up to
+   `GROK_FLEET_DIGEST_WAIT_SEC` (default 900) then posts **one** Telegram card
+   with all hosts + fleet totals + worst proxies
+3. Followers upload only — no Telegram spam
+
+**Per-host card:** `python daily_digest.py --local` (or `GROK_FLEET_DIGEST=0`).
 
 **Not** a session manager. Inventory only (no `--probe` / `--mark-error` /
-gateway DELETE).
+gateway DELETE). No JWT/password in S3 snapshots or Telegram.
 
 ```bash
 # Manual (as farmer user)
 cd ~/grok-farm && source .venv/bin/activate
-python daily_digest.py --dry-run          # print body
-python daily_digest.py --proxy-only       # proxy section focus + send
-python daily_digest.py                    # full digest → Telegram
+python daily_digest.py --dry-run          # print local body + mode
+python daily_digest.py --local            # force per-host Telegram
+python daily_digest.py --no-wait          # leader aggregate now (smoke)
+python daily_digest.py                    # fleet path (upload; leader may wait)
 # systemd
 systemctl status grok-farm-digest.timer --no-pager
 sudo systemctl start grok-farm-digest.service
@@ -657,9 +662,12 @@ tail -50 ~/grok-farm/logs/daily_digest.log
 
 | Need | Action |
 |------|--------|
-| No message | set `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID` in `.env` (chmod 600); smoke `python daily_digest.py` |
+| No message | Telegram env on **leader**; S3 `backup.env` on all hosts; smoke `python daily_digest.py --no-wait` on leader after followers ran once |
+| Four messages/day | ensure fleet mode (not `--local`); only leader sends; set `GROK_FLEET_DIGEST_LEADER_HOST` |
+| Missing host in fleet card | check S3 prefix `farm-vps/fleet-digest/DATE/`; raise wait; fix `GROK_HOST_TAG` |
 | Wrong host label | set `GROK_HOST_TAG=grokN` |
-| Empty proxy section | inject/farm must have written `proxy_stats` (new hosts start empty) |
-| Timer silent | `systemctl enable --now grok-farm-digest.timer`; check `logs/daily_digest.log` |
+| Empty proxy section | inject/farm must have written `proxy_stats` |
+| Timer silent | `systemctl enable --now grok-farm-digest.timer`; check log |
+| Fallback local cards | `GROK_FLEET_DIGEST=0` or missing `backup.env` |
 
-Ban risk: **zero** (read-only inventory + Telegram).
+Ban risk: **zero** (read-only inventory + Telegram + S3 JSON redacted).

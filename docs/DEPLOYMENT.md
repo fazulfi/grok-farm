@@ -267,7 +267,7 @@ Identity (decrypt): laptop + optional `/root/.config/grok-farm/age.identity` (60
 | `grok-farm-mark-expired.service` | oneshot | `scripts/mark_expired_farmed.sh` (farmed only) |
 | `grok-farm-mark-expired.timer` | `*:0/30` + ≤3m random | dead farmed JWT → error |
 | `grok-farm-digest.service` | oneshot | `scripts/daily_digest.sh` → `daily_digest.py` |
-| `grok-farm-digest.timer` | daily ~01:00 UTC + ≤20m random | Telegram daily digest + proxy dashboard |
+| `grok-farm-digest.timer` | daily ~01:00 UTC + ≤5m random | Fleet digest (S3 snapshot + leader Telegram) or `--local` |
 
 - Health log: `~/grok-farm/logs/health_check.log`
 - Digest log: `~/grok-farm/logs/daily_digest.log`
@@ -296,7 +296,7 @@ Manual oneshot: `sudo systemctl start grok-farm-health.service` (or probe/reconc
 - [ ] `systemctl is-active grok-farm-mark-expired.timer` → **active**
 - [ ] `systemctl is-active grok-farm-digest.timer` → **active**
 - [ ] `bash scripts/health_check.sh` or oneshot unit; log in `logs/health_check.log`
-- [ ] `python daily_digest.py --dry-run` then oneshot digest; Telegram card received
+- [ ] `python daily_digest.py --dry-run` (shows MODE=fleet|local); leader smoke `--no-wait` after peers uploaded once
 - [ ] Mid-drain or post-batch `SUMMARY N ok 0 fail`
 - [ ] 9router grok-cli connections grow
 - [ ] Grok model via non-EU proxy on gateway
