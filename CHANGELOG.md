@@ -7,10 +7,23 @@ All notable changes to Grok Farm are documented here.
 ### Added
 
 - **Multi-VPS farmer fleet docs:** live inventory for DO hosts
-  grok4/grok3/grok5/grok6 (+ legacy CSA) in `AGENTS.md` §3/§9,
-  `docs/CAPACITY.md` §6.2, `docs/OPERATIONS.md` §1 — 8G hosts concurrent 2
-  (mid-drain on grok4 only); **grok6** 4G light concurrent **1**; key-only SSH;
-  off-box farmer key backup for trial VPS
+  grok4/grok3/grok5/grok6 in `AGENTS.md` §3/§9, `docs/CAPACITY.md` §6.2,
+  `docs/OPERATIONS.md` §1 — 8G hosts concurrent 2 (mid-drain on grok4 only);
+  **grok6** 4G light concurrent **1**; key-only SSH; off-box farmer key backup
+  for trial VPS
+- **Age/S3 backup on all DO farmers:** per-host
+  `~/.config/grok-farm/backup.env` + `age.pubkey`; S3 prefix
+  `farm-vps/grok{N}`; hourly timer verified Upload OK
+- **Per-batch farm + inject Telegram alerts:** `farm.py` end-of-batch and
+  `workflow.py` inject include full account email lists (ok/fail + reason /
+  fail_class), host, batch; `skip_debounce=True`; never JWT/password; HUD
+  remains primary UI; `alerts.send_alert(..., skip_debounce=)` +
+  `format_email_list()`
+
+### Changed
+
+- **CSA retired** (`168.144.137.240`): production fleet is DO grok3–grok6 only;
+  docs host maps updated (AGENTS / CAPACITY / OPERATIONS)
 
 ### Planned
 
