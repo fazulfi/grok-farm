@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Daily fleet digest + proxy dashboard → Telegram (HTML card).
+"""Fleet-wide ops dashboard + daily digest → **one** global Telegram sticky.
 
-Default (fleet mode when backup.env present):
-  1. Each host uploads a redacted snapshot JSON to S3 under
+Default (when backup.env / S3 present):
+  1. Each host uploads a redacted snapshot to
      farm-vps/fleet-digest/YYYY-MM-DD/<host>.json
-  2. Only the **leader** host aggregates peers and sends **one** Telegram
-     message for the whole fleet.
+  2. Any host (batch event) or leader (daily timer) aggregates peers and
+     **editMessageText** the same sticky card — **global fleet dashboard only**.
+  3. Per-host Telegram cards are disabled when GROK_OPS_DASHBOARD=1.
 
-Per-host Telegram cards: `python daily_digest.py --local`
-Proxy-only / dry-run / json still supported.
+`--local` / dry-run / json still supported for debugging (no per-host spam
+when ops dashboard + S3 are on).
 
 Never includes JWT/password/proxy user:pass (redacted).
 """
@@ -538,7 +539,8 @@ def format_fleet_body(
       4) PROXY — fleet pool health + top fail classes + worst sample
     Soft inventory noise (needs_relogin) is collapsed, not a wall of text.
     """
-    title = title_override or f"Ops dashboard · {date_key}"
+    # Always global fleet title — never "Daily digest · grokN"
+    title = title_override or f"Grok Farm · Fleet dashboard · {date_key}"
     ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
     present = sorted({str(s.get("host") or "?") for s in snaps})
     n_exp = len(expected) if expected else len(present)
@@ -820,7 +822,7 @@ def publish_ops_event(
         expected=expected,
         missing=missing,
         leader=host,
-        title_override=f"Ops dashboard · {date_key}",
+        title_override=f"Grok Farm · Fleet dashboard · {date_key}",
     )
     level = pick_fleet_level(snaps)
     # Prefer event level if worse than fleet health level
@@ -831,6 +833,7 @@ def publish_ops_event(
 
     from alerts import send_or_edit_sticky
 
+    # Always edit sticky in place (1 global message). force_new only if env off.
     sticky = (os.environ.get("GROK_FLEET_DIGEST_STICKY") or "1").strip().lower()
     force_new = sticky in ("0", "false", "off", "no")
     ok = send_or_edit_sticky(
@@ -936,7 +939,7 @@ def list_fleet_snapshots(date_key: str) -> dict[str, dict[str, Any]]:
 def expected_hosts() -> list[str]:
     raw = (os.environ.get("GROK_FLEET_DIGEST_HOSTS") or "").strip()
     if not raw:
-        return ["grok3", "grok4", "grok5", "grok6"]
+        return ["grok3", "grok4", "grok5", "grok6", "grok7"]
     return [h.strip() for h in raw.split(",") if h.strip()]
 
 
@@ -1123,7 +1126,7 @@ def main() -> int:
         sticky = (os.environ.get("GROK_FLEET_DIGEST_STICKY") or "1").strip().lower()
         force_new = sticky in ("0", "false", "off", "no")
         if ops_dashboard_enabled():
-            title = f"Ops dashboard · {date_key}"
+            title = f"Grok Farm · Fleet dashboard · {date_key}"
         ok = send_or_edit_sticky(
             title,
             body,
@@ -1133,29 +1136,38 @@ def main() -> int:
             force_new=force_new,
         )
         print(
-            f"[daily_digest] FLEET host={host} level={level} "
+            f"[daily_digest] FLEET GLOBAL host={host} level={level} "
             f"hosts={len(snaps)} missing={missing} sticky={not force_new} alert_sent={ok}",
             flush=True,
         )
         return 0 if ok else 2
 
-    # ── Local single-host card ────────────────────────────────────────────
-    # When ops dashboard is on, still try sticky (local mid only if no S3)
-    if ops_dashboard_enabled():
-        from alerts import send_or_edit_sticky
-
-        ok = send_or_edit_sticky(
-            title_local,
-            body_local,
-            level=level_local,
-            extra=extra_local,
-            sticky_name=sticky_name(),
+    # ── Local path: NEVER overwrite global sticky with per-host card ──────
+    # When ops dashboard + S3 available, refresh fleet aggregate instead.
+    if ops_dashboard_enabled() and fleet_s3_ready():
+        ok = publish_ops_event(
+            {
+                "kind": "digest_local",
+                "ok": 0,
+                "fail": 0,
+                "level": level_local,
+                "title": "fleet refresh",
+                "note": f"local timer on {host}",
+            }
         )
         print(
-            f"[daily_digest] LOCAL sticky host={host} level={level_local} alert_sent={ok}",
+            f"[daily_digest] GLOBAL via publish host={host} alert_sent={ok}",
             flush=True,
         )
         return 0 if ok else 2
+
+    # Explicit --local or no S3: print-only safe path when dashboard on
+    if ops_dashboard_enabled():
+        print(
+            f"[daily_digest] skip per-host Telegram (global dashboard on, no S3) host={host}",
+            flush=True,
+        )
+        return 0
 
     from alerts import send_alert
 
