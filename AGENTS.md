@@ -70,7 +70,7 @@ WebShare / 9router proxyPools (non-EU) → Farm VPS (non-root user)
 | Role | Example host | User | Notes |
 |------|--------------|------|-------|
 | Farmer (primary / legacy CSA) | `168.144.137.240` (alias `csa`; may be down) | `magadirxwin` | `~/grok-farm` · concurrent ~3 |
-| Farmer fleet (DO trial 2026-07) | `grok4` `157.245.49.4` · `grok3` `143.198.86.242` · `grok5` `206.189.37.233` | `magadirxwin` | 4 vCPU / 8 GB · concurrent **2** · key-only SSH |
+| Farmer fleet (DO trial 2026-07) | `grok4` `157.245.49.4` · `grok3` `143.198.86.242` · `grok5` `206.189.37.233` · `grok6` `174.138.24.143` | `magadirxwin` | 8G hosts concurrent **2**; **grok6** 4G light concurrent **1** · key-only SSH |
 | Gateway | 9router `49.12.82.34:39999` | SSH for inject/sync | HTTP API often `20128` |
 | Backup | S3 `s3://grok-farm/...` on `is3.cloudhost.id` | keys only on VPS | never in git |
 
@@ -323,9 +323,10 @@ Automating account creation may violate third-party ToS. Agents implement techni
 | Host | IP | Role | Concurrent | Mid-drain |
 |------|-----|------|------------|-----------|
 | CSA (legacy) | `168.144.137.240` | primary when up | ~3 | on |
-| grok4 | `157.245.49.4` | DO farmer | 2 | **120s** |
-| grok3 | `143.198.86.242` | DO farmer | 2 | off (`0`) |
-| grok5 | `206.189.37.233` | DO farmer | 2 | off (`0`) |
+| grok4 | `157.245.49.4` | DO farmer 8G | 2 | **120s** |
+| grok3 | `143.198.86.242` | DO farmer 8G | 2 | off (`0`) |
+| grok5 | `206.189.37.233` | DO farmer 8G | 2–3 trial | off (`0`) |
+| grok6 | `174.138.24.143` | DO farmer **4G light** | **1** | off (`0`) |
 
 - App (all farmers): `/home/magadirxwin/grok-farm`
 - DB: per-host `/home/magadirxwin/grok-farm/akun.db` (mode 600)

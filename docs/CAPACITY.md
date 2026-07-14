@@ -104,8 +104,9 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 | CSA | `168.144.137.240` | 8G class | ~3 | on | legacy primary; may be offline |
 | grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **2** | **120s** | only host with mid-drain |
 | grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **2** | off | staggered inject |
-| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **2** | off | staggered inject |
-| grok2 | `157.245.149.116` | 4G | — | — | **skip** full parity (RAM) |
+| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **2**–3 trial | off | staggered inject |
+| grok6 | `174.138.24.143` | **2 vCPU / 4G / 120G** + 8G swap | **1** | off | light farmer only (not full 8G parity) |
+| grok2 | `157.245.149.116` | 4G | — | — | optional light; not required |
 
 **Must on every farmer host:**
 

@@ -24,9 +24,10 @@
 | Tag | IP | Concurrent | Mid-drain | Notes |
 |-----|-----|------------|-----------|-------|
 | CSA | `168.144.137.240` | ~3 | on | legacy; may be offline |
-| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host |
-| grok3 | `143.198.86.242` | 2 | off | post-batch inject |
-| grok5 | `206.189.37.233` | 2 | off | post-batch inject |
+| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host (8G) |
+| grok3 | `143.198.86.242` | 2 | off | post-batch inject (8G) |
+| grok5 | `206.189.37.233` | 2–3 | off | post-batch inject (8G) |
+| grok6 | `174.138.24.143` | **1** | off | **4G light** farmer (2 vCPU / 4G + 8G swap) |
 
 User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 
