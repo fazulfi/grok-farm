@@ -3,10 +3,11 @@ Description=Grok Farm daily digest + proxy dashboard (once per day)
 Requires=grok-farm-digest.service
 
 [Timer]
-# ~01:00 UTC daily; stagger hosts with random delay
+# ~01:00 UTC daily. Keep jitter small so fleet followers upload before
+# leader wait (GROK_FLEET_DIGEST_WAIT_SEC default 900s) ends.
 OnCalendar=*-*-* 01:00:00
 Persistent=true
-RandomizedDelaySec=20m
+RandomizedDelaySec=5m
 
 [Install]
 WantedBy=timers.target
