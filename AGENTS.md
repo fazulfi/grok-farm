@@ -69,10 +69,10 @@ WebShare / 9router proxyPools (non-EU) → Farm VPS (non-root user)
 
 | Role | Example host | User | Notes |
 |------|--------------|------|-------|
-| Farmer (primary / legacy CSA) | `168.144.137.240` (alias `csa`; may be down) | `magadirxwin` | `~/grok-farm` · concurrent ~3 |
-| Farmer fleet (DO trial 2026-07) | `grok4` `157.245.49.4` · `grok3` `143.198.86.242` · `grok5` `206.189.37.233` · `grok6` `174.138.24.143` | `magadirxwin` | 8G hosts concurrent **2**; **grok6** 4G light concurrent **1** · key-only SSH |
+| Farmer fleet (production DO) | `grok4` `157.245.49.4` · `grok3` `143.198.86.242` · `grok5` `206.189.37.233` · `grok6` `174.138.24.143` | `magadirxwin` | 8G hosts concurrent **2** (grok5 trial **3**); **grok6** 4G light concurrent **1** · key-only SSH |
 | Gateway | 9router `49.12.82.34:39999` | SSH for inject/sync | HTTP API often `20128` |
-| Backup | S3 `s3://grok-farm/...` on `is3.cloudhost.id` | keys only on VPS | never in git |
+| Backup | S3 `s3://grok-farm/farm-vps/grok{N}/...` on `is3.cloudhost.id` | keys + age pubkey on VPS only | never in git |
+| ~~CSA~~ | `168.144.137.240` | — | **Retired** 2026-07-14 (offline; not production) |
 
 **Multi-VPS rules (CAPACITY §6):** shared IMAP/domains OK; per-host `akun.db`; `GROK_EMAIL_STYLE=crypto`; mid-drain (`GROK_MID_DRAIN_INTERVAL=120`) on **one** host only (others `0`); never commit secrets; farmer SSH keys backed up off-VPS for trial hosts.
 
@@ -322,15 +322,17 @@ Automating account creation may violate third-party ToS. Agents implement techni
 
 | Host | IP | Role | Concurrent | Mid-drain |
 |------|-----|------|------------|-----------|
-| CSA (legacy) | `168.144.137.240` | primary when up | ~3 | on |
-| grok4 | `157.245.49.4` | DO farmer 8G | 2 | **120s** |
-| grok3 | `143.198.86.242` | DO farmer 8G | 2 | off (`0`) |
-| grok5 | `206.189.37.233` | DO farmer 8G | 2–3 trial | off (`0`) |
-| grok6 | `174.138.24.143` | DO farmer **4G light** | **1** | off (`0`) |
+| grok4 | `157.245.49.4` | farmer 8G | 2 | **120s** |
+| grok3 | `143.198.86.242` | farmer 8G | 2 | off (`0`) |
+| grok5 | `206.189.37.233` | farmer 8G | 2–3 trial | off (`0`) |
+| grok6 | `174.138.24.143` | farmer **4G light** | **1** | off (`0`) |
+| ~~CSA~~ | `168.144.137.240` | **retired** | — | — |
 
 - App (all farmers): `/home/magadirxwin/grok-farm`
 - DB: per-host `/home/magadirxwin/grok-farm/akun.db` (mode 600)
 - Unit: `grok-farmer.service` → `brutal_farmer.sh` **v5** + timers health/probe/reconcile/mark-expired/backup
+- Backup: `~/.config/grok-farm/backup.env` + `age.pubkey`; S3 prefix `farm-vps/grok{N}`; hourly timer
+- Alerts: Telegram on each host (`.env`); per-batch farm/inject account lists (no JWT)
 - 9router SSH: `root@49.12.82.34 -p 39999` with **per-host** farmer key (`~/.ssh/id_ed25519` on VPS; workstation backup under `~/.ssh/grok-farmers-backup/` for trial hosts — **never git**)
 - Root SSH on DO fleet: **key-only** (PasswordAuthentication no); rotate root password if ever chat-exposed
 - **DR:** trial VPS dies → rebuild from key backup + secrets off-box + `docs/MIGRATION.md` / RUNBOOK **R16**; gateway tokens remain SoT via `ops/export_9r_to_akun.py`

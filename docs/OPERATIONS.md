@@ -23,11 +23,11 @@
 
 | Tag | IP | Concurrent | Mid-drain | Notes |
 |-----|-----|------------|-----------|-------|
-| CSA | `168.144.137.240` | ~3 | on | legacy; may be offline |
-| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host (8G) |
-| grok3 | `143.198.86.242` | 2 | off | post-batch inject (8G) |
-| grok5 | `206.189.37.233` | 2–3 | off | post-batch inject (8G) |
-| grok6 | `174.138.24.143` | **1** | off | **4G light** farmer (2 vCPU / 4G + 8G swap) |
+| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host (8G); S3 prefix `farm-vps/grok4` |
+| grok3 | `143.198.86.242` | 2 | off | post-batch inject (8G); `farm-vps/grok3` |
+| grok5 | `206.189.37.233` | 2–3 | off | post-batch inject (8G); `farm-vps/grok5` |
+| grok6 | `174.138.24.143` | **1** | off | **4G light** farmer; `farm-vps/grok6` |
+| ~~CSA~~ | `168.144.137.240` | — | — | **retired** 2026-07-14 |
 
 User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 
@@ -477,19 +477,29 @@ See [CAPACITY.md](./CAPACITY.md).
 
 `alerts.py` fires when **Telegram** (`GROK_TELEGRAM_BOT_TOKEN` +
 `GROK_TELEGRAM_CHAT_ID`) and/or Discord-style webhook (`GROK_ALERT_WEBHOOK` /
-`GROK_FARM_ALERT_WEBHOOK`) is set. Used by `workflow.py` (empty proxy pool,
-all-fail / partial inject, errors) and health timer (hard only).
+`GROK_FARM_ALERT_WEBHOOK`) is set.
+
+| Source | When | Detail |
+|--------|------|--------|
+| `farm.py` end-of-batch | every farm run (ok / partial / all-fail / empty) | Host + batch_id + **full email lists** ok/fail (+ fail reason); HUD remains primary UI; `skip_debounce=True` |
+| `workflow.py` inject | empty pool, all-fail, partial, full ok, error | Host + email lists + fail_class + redacted proxy; `skip_debounce=True` |
+| Health timer | exit **3** hard only | Inventory issues; soft exit 2 = log-only |
 
 - **Leave unset** if unused — do not invent a URL or token.
-- Bodies are redacted (no full JWT / proxy credentials / bot token).
+- Bodies are redacted (**no** full JWT / password / proxy credentials / bot token).
+  Account **emails** + status are allowed for operator visibility.
 - **Debounce:** same title+issues fingerprint suppressed for
   `GROK_ALERT_DEBOUNCE_MIN` minutes (default **60**; `0` = off) via
-  `logs/alert_debounce/<hash>.ts`.
+  `logs/alert_debounce/<hash>.ts`. Per-batch farm/inject alerts use
+  `skip_debounce=True` so each batch is visible.
 - **Health timer:** `grok-farm-health.timer` → `scripts/health_check.sh` →
   `check_status.py --json` every 15 minutes (inventory only; **no** `--probe` /
   `--mark-error`). Alert on exit **3** (hard) or unexpected failure only; exit
   **2** (soft) is log-only. Unit `SuccessExitStatus=2 3`. Log:
   `logs/health_check.log`.
+- **S3 backup:** each host has `~/.config/grok-farm/backup.env` + `age.pubkey`;
+  hourly `local_age_backup.sh` → age encrypt → upload under
+  `s3://grok-farm/farm-vps/grok{N}/…`.
 
 ### Soft observability timers (no session recovery)
 
