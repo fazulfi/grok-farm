@@ -655,12 +655,13 @@ invisible; want **one** fleet summary/day.
    can edit the same card. First run sends; later runs edit. If edit fails,
    bot **deletes** the old mid then sends one replacement (no stack of cards).
    Effects only on brand-new send.
-5. **Ops dashboard UI (default ON, `GROK_OPS_DASHBOARD=1`):** true **dashboard**
-   layout (KPI / LIVE / HOSTS / PROXY) — not a key=value log dump. Soft
-   inventory noise collapsed. Farm/inject end-of-batch → `publish_ops_event`
-   refreshes the same sticky. **All** Telegram alerts (health hard too) also
-   route through sticky when dashboard is on. Set `GROK_BATCH_ALERTS=1` only
-   if you want legacy per-batch messages (not recommended).
+5. **Global fleet dashboard only (default ON, `GROK_OPS_DASHBOARD=1`):** one
+   card for the **whole fleet** (KPI / LIVE / HOSTS / PROXY) — not per-VPS
+   digests and not a key=value log dump. Soft inventory noise collapsed.
+   Farm/inject/health → `publish_ops_event` uploads this host’s snapshot then
+   re-aggregates peers and **edits** the same sticky. Title is always
+   `Grok Farm · Fleet dashboard · …`. Set `GROK_BATCH_ALERTS=1` only for
+   legacy per-batch messages (not recommended).
 
 **Per-host card:** `python daily_digest.py --local` (or `GROK_FLEET_DIGEST=0`).
 

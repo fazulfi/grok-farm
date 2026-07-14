@@ -18,10 +18,11 @@ All notable changes to Grok Farm are documented here.
   farm/inject batch** via `daily_digest.publish_ops_event` + S3-shared
   `message_id` (`farm-vps/fleet-digest/sticky_fleet_digest.json`). Default
   `GROK_OPS_DASHBOARD=1` silences per-batch spam (`GROK_BATCH_ALERTS=0`).
-  Card is a **true dashboard** (KPI / LIVE / HOSTS / PROXY) — not a log dump;
-  soft inventory collapsed. All Telegram alerts (including health hard) route
-  through `send_or_edit_sticky` so chat stays **1 message only** (edit; delete
-  orphan on recreate). RUNBOOK **R20**.
+  Card is a **true global fleet dashboard** (KPI / LIVE / HOSTS / PROXY) — not
+  a log dump and **not per-VPS cards**. Soft inventory collapsed. All Telegram
+  alerts (health hard included) call `publish_ops_event` → aggregate S3
+  snapshots → edit the **same** sticky mid (1 message only; delete orphan on
+  recreate). Title: `Grok Farm · Fleet dashboard · YYYY-MM-DD`. RUNBOOK **R20**.
 - **grok7 farmer host:** `157.245.199.70` (8G, concurrent **3**, mid-drain off,
   batch prefix `g7`); age/S3 prefix `farm-vps/grok7`; fleet digest hosts list
   includes grok7 (leader remains grok3). Inventory docs: AGENTS §3/§9,
