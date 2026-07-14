@@ -648,12 +648,16 @@ invisible; want **one** fleet summary/day.
    `GROK_FLEET_DIGEST_WAIT_SEC` (default 900) then posts **one** Telegram card
    with all hosts + fleet totals + worst proxies
 3. Followers upload only — no Telegram spam
-4. **Sticky card (default):** leader uses `editMessageText` on the same
-   `message_id` (`send_or_edit_sticky`, state
-   `~/.config/grok-farm/telegram_sticky_fleet_digest.json`) so re-runs **update
-   one message** instead of spamming new cards. First run sends; later runs
-   edit. Set `GROK_FLEET_DIGEST_STICKY=0` to force a new message each time.
-   Effects only apply on brand-new send (Telegram cannot animate edits).
+4. **Sticky card (default):** `editMessageText` on one `message_id`
+   (`send_or_edit_sticky`). State is **local**
+   (`~/.config/grok-farm/telegram_sticky_fleet_digest.json`) **and S3-shared**
+   (`s3://…/farm-vps/fleet-digest/sticky_fleet_digest.json`) so **any host**
+   can edit the same card. First run sends; later runs edit.
+   `GROK_FLEET_DIGEST_STICKY=0` forces a new message. Effects only on brand-new send.
+5. **Ops dashboard (default ON, `GROK_OPS_DASHBOARD=1`):** farm/inject end-of-batch
+   calls `daily_digest.publish_ops_event` → upload snapshot with `last_event` →
+   refresh the **same** sticky card (no per-batch spam). Set `GROK_BATCH_ALERTS=1`
+   for legacy new Telegram messages per batch.
 
 **Per-host card:** `python daily_digest.py --local` (or `GROK_FLEET_DIGEST=0`).
 
@@ -667,8 +671,10 @@ python daily_digest.py --dry-run          # print local body + mode
 python daily_digest.py --local            # force per-host Telegram
 python daily_digest.py --no-wait          # leader aggregate now (smoke / sticky edit)
 python daily_digest.py                    # fleet path (upload; leader may wait)
-# sticky state (leader only)
+# sticky state (local + S3 shared mid)
 cat ~/.config/grok-farm/telegram_sticky_fleet_digest.json
+# simulate per-batch sticky refresh
+python -c "from daily_digest import publish_ops_event; print(publish_ops_event({'kind':'smoke','ok':1,'fail':0,'level':'success','title':'ops smoke'}))"
 # systemd
 systemctl status grok-farm-digest.timer --no-pager
 sudo systemctl start grok-farm-digest.service
@@ -678,14 +684,16 @@ tail -50 ~/grok-farm/logs/daily_digest.log
 
 | Need | Action |
 |------|--------|
-| No message | Telegram env on **leader**; S3 `backup.env` on all hosts; smoke `python daily_digest.py --no-wait` on leader after followers ran once |
-| Four messages/day | ensure fleet mode (not `--local`); only leader sends; set `GROK_FLEET_DIGEST_LEADER_HOST` |
-| New message every run | sticky on by default; check sticky state file; edit fails → resend + new mid |
+| No message | Telegram env on hosts that refresh; S3 `backup.env` on all; smoke `python daily_digest.py --no-wait` or `publish_ops_event` |
+| Spam per batch | ensure `GROK_OPS_DASHBOARD=1` and `GROK_BATCH_ALERTS` unset/0; redeploy farm/workflow |
+| Four messages/day (timer) | fleet mode not `--local`; only leader sends daily; set `GROK_FLEET_DIGEST_LEADER_HOST` |
+| New message every run | sticky on; check local + S3 sticky key; edit fails → resend + new mid |
 | Want always new msg | `GROK_FLEET_DIGEST_STICKY=0` |
-| Missing host in fleet card | check S3 prefix `farm-vps/fleet-digest/DATE/`; raise wait; fix `GROK_HOST_TAG` |
+| Missing host in fleet card | S3 prefix `farm-vps/fleet-digest/DATE/`; raise wait; fix `GROK_HOST_TAG` |
 | Wrong host label | set `GROK_HOST_TAG=grokN` |
 | Empty proxy section | inject/farm must have written `proxy_stats` |
 | Timer silent | `systemctl enable --now grok-farm-digest.timer`; check log |
 | Fallback local cards | `GROK_FLEET_DIGEST=0` or missing `backup.env` |
+| Disable live dashboard | `GROK_OPS_DASHBOARD=0` (batch alerts may return if `GROK_BATCH_ALERTS=1`) |
 
 Ban risk: **zero** (read-only inventory + Telegram + S3 JSON redacted).

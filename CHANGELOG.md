@@ -14,6 +14,11 @@ All notable changes to Grok Farm are documented here.
   `alerts.send_or_edit_sticky` so daily fleet digest **updates one message**
   instead of spamming. State: `~/.config/grok-farm/telegram_sticky_fleet_digest.json`
   (chmod 600). `GROK_FLEET_DIGEST_STICKY=0` forces new message. RUNBOOK **R20**.
+- **Single ops dashboard (Telegram):** one fleet sticky card updated **per
+  farm/inject batch** via `daily_digest.publish_ops_event` + S3-shared
+  `message_id` (`farm-vps/fleet-digest/sticky_fleet_digest.json`). Default
+  `GROK_OPS_DASHBOARD=1` silences per-batch spam (`GROK_BATCH_ALERTS=0`).
+  Card shows LAST EVENTS + host health + proxy soft-skip. RUNBOOK **R20**.
 - **grok7 farmer host:** `157.245.199.70` (8G, concurrent **3**, mid-drain off,
   batch prefix `g7`); age/S3 prefix `farm-vps/grok7`; fleet digest hosts list
   includes grok7 (leader remains grok3). Inventory docs: AGENTS §3/§9,
