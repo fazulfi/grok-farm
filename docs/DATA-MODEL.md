@@ -66,7 +66,7 @@ Soft-evict mirrors `domain_stats` (local skip only; **never** auto-DELETE gatewa
 | `last_fail_at` | TIMESTAMP | Last fail |
 | `last_email` | TEXT | Last related account email |
 | `score` | REAL | `success / (success+fail)` in \[0,1\] |
-| `disabled` | INTEGER | Manual disable flag (0/1); success clears auto path |
+| `disabled` | INTEGER | Soft-disable flag (0/1); auto-set when `consecutive_fails >= thr` on fail; success clears |
 | `last_fail_reason` | TEXT | Short taxonomy label (no secrets) |
 | `updated_at` | TIMESTAMP | Last update |
 
@@ -78,6 +78,11 @@ Soft-evict mirrors `domain_stats` (local skip only; **never** auto-DELETE gatewa
 `workflow.pick_proxy()` (inject) and `farm.next_proxy()` (farm) score-weight the
 remainder; if all would be skipped, pick **fails open** to the full list. Empty
 live proxyPools still **fail-closed** on inject.
+
+**Re-enable (local only):** `reenable_proxy` / `reenable_proxies` + CLI
+`python reenable_proxy.py --list|--match|--all` clear `disabled` (and optionally
+`consecutive_fails` / `last_fail_reason`). **Never** DELETEs 9router
+`proxyPools`.
 
 ### Table `domain_stats`
 

@@ -580,12 +580,19 @@ farm skipped after empty local proxy file.
 | Empty local file | `brutal_farmer` skips **farm** that round after sync |
 | Sync soft-filter | gateway `list_proxies.py` drops `isActive=0` / bad `testStatus` when present; fail-open if filter empties |
 | Gateway DELETE | **never automatic** — manual/CLI only (`proxy_cleaner` ops) |
+| Auto-disable | fail path sets `disabled=1` when `consecutive_fails >= thr` (local only) |
+| Re-enable CLI | `python reenable_proxy.py` — local `akun.db` only; **never** gateway DELETE |
 
 ### Triage
 
 ```bash
 cd ~/grok-farm
 python3 check_status.py --json | jq '.proxy_soft_skip, .issues_soft, .issues_hard'
+python3 reenable_proxy.py --list
+# Re-enable one host:port fragment or all soft-skipped (dry-run first):
+python3 reenable_proxy.py --match 1.2.3.4:8080 --dry-run
+python3 reenable_proxy.py --match 1.2.3.4:8080
+python3 reenable_proxy.py --all --dry-run
 sqlite3 akun.db \
   "SELECT proxy_key, success_count, fail_count, consecutive_fails, disabled, score, last_fail_reason
    FROM proxy_stats ORDER BY consecutive_fails DESC, score ASC LIMIT 15;"
@@ -593,8 +600,9 @@ sqlite3 akun.db \
 python3 sync_proxies_from_9r.py
 ```
 
-**Do not** mass-DELETE `proxyPools` from the farm product path. Clear soft-skip by
-successful inject/farm uses (resets consecutive_fails) or SQL `disabled=0` after
+**Do not** mass-DELETE `proxyPools` from the farm product path. Clear soft-skip by:
+successful inject/farm (resets consecutive_fails + clears disabled), **or**
+`python reenable_proxy.py --match …` / `--all`, **or** SQL `disabled=0` after
 fixing the node.
 
 ---
@@ -640,6 +648,12 @@ invisible; want **one** fleet summary/day.
    `GROK_FLEET_DIGEST_WAIT_SEC` (default 900) then posts **one** Telegram card
    with all hosts + fleet totals + worst proxies
 3. Followers upload only — no Telegram spam
+4. **Sticky card (default):** leader uses `editMessageText` on the same
+   `message_id` (`send_or_edit_sticky`, state
+   `~/.config/grok-farm/telegram_sticky_fleet_digest.json`) so re-runs **update
+   one message** instead of spamming new cards. First run sends; later runs
+   edit. Set `GROK_FLEET_DIGEST_STICKY=0` to force a new message each time.
+   Effects only apply on brand-new send (Telegram cannot animate edits).
 
 **Per-host card:** `python daily_digest.py --local` (or `GROK_FLEET_DIGEST=0`).
 
@@ -651,8 +665,10 @@ gateway DELETE). No JWT/password in S3 snapshots or Telegram.
 cd ~/grok-farm && source .venv/bin/activate
 python daily_digest.py --dry-run          # print local body + mode
 python daily_digest.py --local            # force per-host Telegram
-python daily_digest.py --no-wait          # leader aggregate now (smoke)
+python daily_digest.py --no-wait          # leader aggregate now (smoke / sticky edit)
 python daily_digest.py                    # fleet path (upload; leader may wait)
+# sticky state (leader only)
+cat ~/.config/grok-farm/telegram_sticky_fleet_digest.json
 # systemd
 systemctl status grok-farm-digest.timer --no-pager
 sudo systemctl start grok-farm-digest.service
@@ -664,6 +680,8 @@ tail -50 ~/grok-farm/logs/daily_digest.log
 |------|--------|
 | No message | Telegram env on **leader**; S3 `backup.env` on all hosts; smoke `python daily_digest.py --no-wait` on leader after followers ran once |
 | Four messages/day | ensure fleet mode (not `--local`); only leader sends; set `GROK_FLEET_DIGEST_LEADER_HOST` |
+| New message every run | sticky on by default; check sticky state file; edit fails → resend + new mid |
+| Want always new msg | `GROK_FLEET_DIGEST_STICKY=0` |
 | Missing host in fleet card | check S3 prefix `farm-vps/fleet-digest/DATE/`; raise wait; fix `GROK_HOST_TAG` |
 | Wrong host label | set `GROK_HOST_TAG=grokN` |
 | Empty proxy section | inject/farm must have written `proxy_stats` |

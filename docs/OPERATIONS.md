@@ -505,11 +505,15 @@ See [CAPACITY.md](./CAPACITY.md).
   (~01:00 UTC + ≤5m random) → `scripts/daily_digest.sh` → `daily_digest.py`.
   Default: each host uploads a redacted snapshot to
   `s3://…/farm-vps/fleet-digest/YYYY-MM-DD/<host>.json` (uses `backup.env` S3);
-  **leader** waits for peers then posts **one** Telegram fleet card (health +
-  proxy totals/worst). Followers do not send Telegram. Per-host card:
-  `python daily_digest.py --local`. Manual: `--dry-run` / `--proxy-only` /
-  `--fleet` / `--json`. Log: `logs/daily_digest.log`. Env: `GROK_HOST_TAG`,
-  `GROK_FLEET_DIGEST*` (see `.env.example`).
+  **leader** waits for peers then posts/updates **one sticky** Telegram fleet
+  card (`editMessageText` via `send_or_edit_sticky`; state
+  `~/.config/grok-farm/telegram_sticky_fleet_digest.json`). Followers do not
+  send Telegram. Per-host card: `python daily_digest.py --local`. Manual:
+  `--dry-run` / `--proxy-only` / `--fleet` / `--json` / `--no-wait`. Log:
+  `logs/daily_digest.log`. Env: `GROK_HOST_TAG`, `GROK_FLEET_DIGEST*`,
+  `GROK_FLEET_DIGEST_STICKY` (see `.env.example`). RUNBOOK **R20**.
+- **Proxy re-enable CLI:** `python reenable_proxy.py --list|--match|--all`
+  clears local soft-skip only (never gateway DELETE). RUNBOOK **R18**.
 - **S3 backup:** each host has `~/.config/grok-farm/backup.env` + `age.pubkey`;
   hourly `local_age_backup.sh` → age encrypt → upload under
   `s3://grok-farm/farm-vps/grok{N}/…`.
