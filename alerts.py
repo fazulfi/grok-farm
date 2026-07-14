@@ -180,20 +180,116 @@ def _should_send(title: str, body: str, level: str, extra: Optional[dict[str, An
     return True
 
 
-def _post_json(url: str, payload: dict[str, Any], timeout: float = 15) -> bool:
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout: float = 15,
+) -> tuple[bool, Optional[dict[str, Any]]]:
+    """POST JSON to Telegram/Discord. Returns (ok, parsed_body_or_None).
+
+    Telegram sendMessage/editMessageText bodies include result.message_id.
+    Never logs bot tokens.
+    """
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "grok-farm-alerts/1.3"},
+        headers={"Content-Type": "application/json", "User-Agent": "grok-farm-alerts/1.4"},
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return 200 <= getattr(resp, "status", 200) < 300
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+            status = getattr(resp, "status", 200)
+            raw = resp.read().decode("utf-8", errors="replace")
+            body: Optional[dict[str, Any]] = None
+            try:
+                parsed = json.loads(raw) if raw.strip() else None
+                if isinstance(parsed, dict):
+                    body = parsed
+            except json.JSONDecodeError:
+                body = None
+            ok = 200 <= status < 300
+            if body is not None and body.get("ok") is False:
+                ok = False
+            return ok, body
+    except (urllib.error.URLError, TimeoutError, OSError, urllib.error.HTTPError) as e:
+        # Try to read Telegram error JSON from HTTPError
+        body = None
+        if isinstance(e, urllib.error.HTTPError):
+            try:
+                raw = e.read().decode("utf-8", errors="replace")
+                parsed = json.loads(raw) if raw.strip() else None
+                if isinstance(parsed, dict):
+                    body = parsed
+            except Exception:
+                pass
         print(f"[ALERT] post failed: {redact(e)}")
-        return False
+        return False, body
+
+
+def _post_json_ok(url: str, payload: dict[str, Any], timeout: float = 15) -> bool:
+    """Boolean wrapper for callers that only need success/fail."""
+    ok, _ = _post_json(url, payload, timeout=timeout)
+    return ok
+
+
+def sticky_state_path(name: str = "fleet_digest") -> Path:
+    """Path for sticky Telegram message_id state (never git)."""
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", (name or "fleet_digest").strip()) or "fleet"
+    base = Path(
+        os.path.expanduser(
+            os.environ.get("GROK_TELEGRAM_STICKY_DIR")
+            or "~/.config/grok-farm"
+        )
+    )
+    return base / f"telegram_sticky_{safe}.json"
+
+
+def load_sticky_message_id(name: str = "fleet_digest") -> Optional[int]:
+    path = sticky_state_path(name)
+    try:
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        mid = data.get("message_id")
+        if mid is None:
+            return None
+        return int(mid)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def save_sticky_message_id(
+    message_id: int,
+    name: str = "fleet_digest",
+    *,
+    chat_id: str = "",
+) -> None:
+    path = sticky_state_path(name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "message_id": int(message_id),
+            "chat_id": str(chat_id or telegram_chat_id() or ""),
+            "updated_at": int(time.time()),
+            "name": name,
+        }
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as e:
+        print(f"[ALERT] sticky state save failed: {redact(e)}", flush=True)
+
+
+def clear_sticky_message_id(name: str = "fleet_digest") -> None:
+    path = sticky_state_path(name)
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
 
 
 def format_email_list(
@@ -355,17 +451,29 @@ def format_alert_html(
     return text
 
 
+def _extract_message_id(body: Optional[dict[str, Any]]) -> Optional[int]:
+    if not body or not isinstance(body, dict):
+        return None
+    result = body.get("result")
+    if isinstance(result, dict) and result.get("message_id") is not None:
+        try:
+            return int(result["message_id"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _send_telegram(
     text: str,
     *,
     parse_mode: Optional[str] = None,
     message_effect_id: Optional[str] = None,
-) -> bool:
-    """Send via Telegram Bot API when token + chat_id are set. Never logs token."""
+) -> tuple[bool, Optional[int]]:
+    """Send via Telegram Bot API. Returns (ok, message_id). Never logs token."""
     token = telegram_bot_token()
     chat_id = telegram_chat_id()
     if not token or not chat_id:
-        return False
+        return False, None
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -376,17 +484,51 @@ def _send_telegram(
         payload["parse_mode"] = parse_mode
     if message_effect_id:
         payload["message_effect_id"] = str(message_effect_id)
-    ok = _post_json(url, payload)
+    ok, body = _post_json(url, payload)
+    mid = _extract_message_id(body) if ok else None
     if not ok and message_effect_id:
         # Effects only work in private chats; retry without effect if rejected
         payload.pop("message_effect_id", None)
-        ok = _post_json(url, payload)
+        ok, body = _post_json(url, payload)
+        mid = _extract_message_id(body) if ok else None
         if ok:
             print("[ALERT] telegram effect unsupported — sent without effect", flush=True)
-            return True
+            return True, mid
     if not ok:
         print("[ALERT] telegram sendMessage failed (token/chat_id redacted)")
-    return ok
+    return ok, mid
+
+
+def _edit_telegram(
+    message_id: int,
+    text: str,
+    *,
+    parse_mode: Optional[str] = None,
+) -> bool:
+    """editMessageText for sticky live-updating cards. No message_effect on edit."""
+    token = telegram_bot_token()
+    chat_id = telegram_chat_id()
+    if not token or not chat_id or not message_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/editMessageText"
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": int(message_id),
+        "text": text[:4000],
+        "disable_web_page_preview": True,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    ok, body = _post_json(url, payload)
+    if ok:
+        return True
+    # "message is not modified" is success for sticky updates
+    desc = ""
+    if body and isinstance(body, dict):
+        desc = str(body.get("description") or "").lower()
+    if "message is not modified" in desc:
+        return True
+    return False
 
 
 def _send_telegram_rich(
@@ -394,18 +536,83 @@ def _send_telegram_rich(
     plain_text: str,
     *,
     level: str = "info",
-) -> bool:
+) -> tuple[bool, Optional[int]]:
     """Prefer HTML card + effect; fall back to plain / no-effect if Telegram rejects."""
     effect = _effect_for_level(level)
-    if _send_telegram(html_text, parse_mode="HTML", message_effect_id=effect):
-        return True
+    ok, mid = _send_telegram(html_text, parse_mode="HTML", message_effect_id=effect)
+    if ok:
+        return True, mid
     # Retry HTML without effect
-    if effect and _send_telegram(html_text, parse_mode="HTML", message_effect_id=None):
-        print("[ALERT] telegram HTML ok without effect", flush=True)
-        return True
+    if effect:
+        ok, mid = _send_telegram(html_text, parse_mode="HTML", message_effect_id=None)
+        if ok:
+            print("[ALERT] telegram HTML ok without effect", flush=True)
+            return True, mid
     # Retry without parse_mode (bad entities / unexpected tags)
     print("[ALERT] telegram HTML rejected — falling back to plain text")
     return _send_telegram(plain_text, parse_mode=None, message_effect_id=None)
+
+
+def send_or_edit_sticky(
+    title: str,
+    body: str = "",
+    level: str = "info",
+    extra: Optional[dict[str, Any]] = None,
+    *,
+    sticky_name: str = "fleet_digest",
+    force_new: bool = False,
+) -> bool:
+    """Send or edit a single sticky Telegram message (live-updating card).
+
+    Used by fleet daily digest so the bot keeps one message that updates
+    instead of spamming a new card each run. Falls back to sendMessage if
+    no saved message_id or edit fails (message deleted / too old).
+    Effects only on brand-new send (Telegram cannot animate edits).
+    """
+    has_tg = bool(telegram_bot_token() and telegram_chat_id())
+    if not has_tg:
+        # Fallback: normal alert path (webhook may still work)
+        return send_alert(title, body, level=level, extra=extra, skip_debounce=True)
+
+    safe_title = redact(title)[:200]
+    safe_body = redact(body)[:3500]
+    plain = format_alert_plain(safe_title, safe_body, level)
+    html = format_alert_html(safe_title, safe_body, level, extra)
+
+    mid: Optional[int] = None if force_new else load_sticky_message_id(sticky_name)
+    if mid is not None:
+        if _edit_telegram(mid, html, parse_mode="HTML"):
+            print(
+                f"[ALERT] sticky edited mid={mid} level={level} title={safe_title[:60]}",
+                flush=True,
+            )
+            save_sticky_message_id(mid, sticky_name)
+            return True
+        if _edit_telegram(mid, plain, parse_mode=None):
+            print(
+                f"[ALERT] sticky edited plain mid={mid} level={level}",
+                flush=True,
+            )
+            save_sticky_message_id(mid, sticky_name)
+            return True
+        print(
+            f"[ALERT] sticky edit failed mid={mid} — sending new message",
+            flush=True,
+        )
+        clear_sticky_message_id(sticky_name)
+
+    ok, new_mid = _send_telegram_rich(html, plain, level=level)
+    if ok and new_mid is not None:
+        save_sticky_message_id(new_mid, sticky_name)
+        print(
+            f"[ALERT] sticky sent mid={new_mid} level={level} title={safe_title[:60]}",
+            flush=True,
+        )
+    elif ok:
+        print(f"[ALERT] sticky sent (no mid) level={level}", flush=True)
+    else:
+        print(f"[ALERT] sticky failed level={level} title={safe_title[:60]}", flush=True)
+    return ok
 
 
 def _send_webhook(
@@ -444,18 +651,18 @@ def _send_webhook(
             }
             if effect:
                 payload_html["message_effect_id"] = effect
-            if _post_json(base, payload_html):
+            if _post_json_ok(base, payload_html):
                 return True
             if effect:
                 payload_html.pop("message_effect_id", None)
-                if _post_json(base, payload_html):
+                if _post_json_ok(base, payload_html):
                     return True
         payload: dict[str, Any] = {
             "chat_id": chat,
             "text": (plain_text or content)[:4000],
             "disable_web_page_preview": True,
         }
-        return _post_json(base, payload)
+        return _post_json_ok(base, payload)
 
     # Discord-compatible: markdown content
     emoji, label = LEVEL_META.get(level.lower(), ("ℹ️", level.upper()))
@@ -468,7 +675,7 @@ def _send_webhook(
     }
     if extra:
         payload["extra"] = {k: redact(v) if isinstance(v, str) else v for k, v in extra.items()}
-    return _post_json(url, payload)
+    return _post_json_ok(url, payload)
 
 
 def send_alert(
@@ -503,7 +710,8 @@ def send_alert(
 
     sent = False
     if has_tg:
-        sent = _send_telegram_rich(html, plain, level=level) or sent
+        ok_tg, _mid = _send_telegram_rich(html, plain, level=level)
+        sent = ok_tg or sent
     if url:
         sent = (
             _send_webhook(
