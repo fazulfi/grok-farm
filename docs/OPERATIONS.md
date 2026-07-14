@@ -9,15 +9,26 @@
 
 | Service | Host | Unit / process | Purpose |
 |---------|------|----------------|---------|
-| `grok-farmer` | Farm VPS | `systemd` (`brutal_farmer.sh` **v5**) | Unlimited farm → import → inject loop |
-| Camoufox | Farm VPS | child of `farm.py` | Browser automation |
+| `grok-farmer` | Each farm VPS | `systemd` (`brutal_farmer.sh` **v5**) | Unlimited farm → import → inject loop |
+| Camoufox | Each farm VPS | child of `farm.py` | Browser automation |
 | 9router | Gateway VPS | `next-server` / custom | LLM gateway + proxyPools |
 | SSH tunnel path | Farm → Gateway | OpenSSH key | Proxy sync + inject |
-| `grok-farm-backup.timer` | Farm VPS | systemd timer | Hourly age-encrypted backup: **S3** `s3://grok-farm/farm-vps/csa/grok/` when `~/.config/grok-farm/backup.env` present; else local `~/grok-farm/backups/` |
-| `grok-farm-health.timer` | Farm VPS | systemd timer | Every **15 min** (`*:0/15` + RandomizedDelay ≤2m): inventory `check_status.py --json` via `scripts/health_check.sh`; webhook on **hard** exit **3** only (soft exit 2 = log-only) |
-| `grok-farm-probe.timer` | Farm VPS | systemd timer | Every **6h**: soft `probe_tokens.py` (`scripts/probe_soft.sh`, no `--mark-error`) |
-| `grok-farm-reconcile.timer` | Farm VPS | systemd timer | Every **12h**: `reconcile_9router.py --json` report only |
-| `grok-farm-mark-expired.timer` | Farm VPS | systemd timer | Every **30 min**: mark **farmed-only** expired JWTs as `error` (no `--include-injected`) |
+| `grok-farm-backup.timer` | Each farm VPS | systemd timer | Hourly age-encrypted backup: **S3** when `~/.config/grok-farm/backup.env` present; else local `~/grok-farm/backups/` |
+| `grok-farm-health.timer` | Each farm VPS | systemd timer | Every **15 min** (`*:0/15` + RandomizedDelay ≤2m): inventory `check_status.py --json` via `scripts/health_check.sh`; webhook on **hard** exit **3** only (soft exit 2 = log-only) |
+| `grok-farm-probe.timer` | Each farm VPS | systemd timer | Every **6h**: soft `probe_tokens.py` (`scripts/probe_soft.sh`, no `--mark-error`) |
+| `grok-farm-reconcile.timer` | Each farm VPS | systemd timer | Every **12h**: `reconcile_9router.py --json` report only |
+| `grok-farm-mark-expired.timer` | Each farm VPS | systemd timer | Every **30 min**: mark **farmed-only** expired JWTs as `error` (no `--include-injected`) |
+
+### Fleet hosts (2026-07-14)
+
+| Tag | IP | Concurrent | Mid-drain | Notes |
+|-----|-----|------------|-----------|-------|
+| CSA | `168.144.137.240` | ~3 | on | legacy; may be offline |
+| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host |
+| grok3 | `143.198.86.242` | 2 | off | post-batch inject |
+| grok5 | `206.189.37.233` | 2 | off | post-batch inject |
+
+User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 
 ### Auto import / inject (brutal v5)
 
