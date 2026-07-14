@@ -18,6 +18,7 @@
 | `grok-farm-probe.timer` | Each farm VPS | systemd timer | Every **6h**: soft `probe_tokens.py` (`scripts/probe_soft.sh`, no `--mark-error`) |
 | `grok-farm-reconcile.timer` | Each farm VPS | systemd timer | Every **12h**: `reconcile_9router.py --json` report only |
 | `grok-farm-mark-expired.timer` | Each farm VPS | systemd timer | Every **30 min**: mark **farmed-only** expired JWTs as `error` (no `--include-injected`) |
+| `grok-farm-digest.timer` | Each farm VPS | systemd timer | Daily **~01:00 UTC** (+ ≤20m random): `daily_digest.py` → Telegram **daily digest + proxy dashboard** (inventory only; no probe/mark-error) |
 
 ### Fleet hosts (2026-07-14)
 
@@ -499,6 +500,11 @@ See [CAPACITY.md](./CAPACITY.md).
   `--mark-error`). Alert on exit **3** (hard) or unexpected failure only; exit
   **2** (soft) is log-only. Unit `SuccessExitStatus=2 3`. Log:
   `logs/health_check.log`.
+- **Daily digest + proxy dashboard:** `grok-farm-digest.timer` (~01:00 UTC +
+  ≤20m random) → `scripts/daily_digest.sh` → `daily_digest.py`. Each host posts
+  one Telegram HTML card (health inventory + proxy score/soft-skip/fail taxonomy
+  + domain_stats). Manual: `python daily_digest.py` / `--proxy-only` /
+  `--dry-run`. Log: `logs/daily_digest.log`. Optional `GROK_HOST_TAG`.
 - **S3 backup:** each host has `~/.config/grok-farm/backup.env` + `age.pubkey`;
   hourly `local_age_backup.sh` → age encrypt → upload under
   `s3://grok-farm/farm-vps/grok{N}/…`.
@@ -510,6 +516,7 @@ See [CAPACITY.md](./CAPACITY.md).
 | `grok-farm-probe.timer` | `scripts/probe_soft.sh` | Soft probe; never `--mark-error` |
 | `grok-farm-reconcile.timer` | `scripts/reconcile_soft.sh` | Diff report only |
 | `grok-farm-mark-expired.timer` | `scripts/mark_expired_farmed.sh` | farmed JWT → `error` only |
+| `grok-farm-digest.timer` | `scripts/daily_digest.sh` | Telegram daily digest + proxy dashboard |
 
 ---
 

@@ -623,3 +623,43 @@ sudo systemctl enable --now grok-farm-mark-expired.timer
 
 Ban risk: probe is soft inventory only (same as R13). Mark-expired does not touch
 injected rows and does not revoke gateway connections.
+
+---
+
+## R20 — Daily digest / proxy dashboard (Telegram)
+
+**Symptoms:** no daily Telegram card; proxy soft-skip invisible; want fleet
+summary without scrolling per-batch alerts.
+
+**What it is:** each farmer posts **one** HTML card/day with:
+
+1. **Health** — farmer active, accounts (injected/farmed/error), JWT/soft probe
+   %, disk, backup status, hard/soft issues
+2. **Proxy dashboard** — local file line count, `proxy_stats` tracked /
+   soft-skip / disabled, fail_reason taxonomy, top + worst proxies (redacted),
+   domain_stats snapshot
+
+**Not** a session manager. Inventory only (no `--probe` / `--mark-error` /
+gateway DELETE).
+
+```bash
+# Manual (as farmer user)
+cd ~/grok-farm && source .venv/bin/activate
+python daily_digest.py --dry-run          # print body
+python daily_digest.py --proxy-only       # proxy section focus + send
+python daily_digest.py                    # full digest → Telegram
+# systemd
+systemctl status grok-farm-digest.timer --no-pager
+sudo systemctl start grok-farm-digest.service
+sudo systemctl enable --now grok-farm-digest.timer
+tail -50 ~/grok-farm/logs/daily_digest.log
+```
+
+| Need | Action |
+|------|--------|
+| No message | set `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID` in `.env` (chmod 600); smoke `python daily_digest.py` |
+| Wrong host label | set `GROK_HOST_TAG=grokN` |
+| Empty proxy section | inject/farm must have written `proxy_stats` (new hosts start empty) |
+| Timer silent | `systemctl enable --now grok-farm-digest.timer`; check `logs/daily_digest.log` |
+
+Ban risk: **zero** (read-only inventory + Telegram).

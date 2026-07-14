@@ -131,22 +131,26 @@ sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farm-reconcile.service > /etc/systemd/system/grok-farm-reconcile.service
 sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
   systemd/grok-farm-mark-expired.service > /etc/systemd/system/grok-farm-mark-expired.service
+sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+  systemd/grok-farm-digest.service > /etc/systemd/system/grok-farm-digest.service
 cp systemd/grok-farm-backup.timer /etc/systemd/system/
 cp systemd/grok-farm-health.timer /etc/systemd/system/
 cp systemd/grok-farm-probe.timer /etc/systemd/system/
 cp systemd/grok-farm-reconcile.timer /etc/systemd/system/
 cp systemd/grok-farm-mark-expired.timer /etc/systemd/system/
+cp systemd/grok-farm-digest.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now grok-farm-backup.timer
 systemctl enable --now grok-farm-health.timer
 systemctl enable --now grok-farm-probe.timer
 systemctl enable --now grok-farm-reconcile.timer
 systemctl enable --now grok-farm-mark-expired.timer
+systemctl enable --now grok-farm-digest.timer
 # Do NOT start farmer until .env + proxies ready
 ```
 
 `deploy_farm_vps.sh` installs farmer + backup + health + probe + reconcile +
-mark-expired units the same way (farmer **not** restarted).
+mark-expired + **digest** units the same way (farmer **not** restarted).
 
 ### 2.6 One-shot test (before unlimited loop)
 
@@ -262,13 +266,17 @@ Identity (decrypt): laptop + optional `/root/.config/grok-farm/age.identity` (60
 | `grok-farm-reconcile.timer` | every 12h + random delay | gateway vs DB report |
 | `grok-farm-mark-expired.service` | oneshot | `scripts/mark_expired_farmed.sh` (farmed only) |
 | `grok-farm-mark-expired.timer` | `*:0/30` + ≤3m random | dead farmed JWT → error |
+| `grok-farm-digest.service` | oneshot | `scripts/daily_digest.sh` → `daily_digest.py` |
+| `grok-farm-digest.timer` | daily ~01:00 UTC + ≤20m random | Telegram daily digest + proxy dashboard |
 
 - Health log: `~/grok-farm/logs/health_check.log`
+- Digest log: `~/grok-farm/logs/daily_digest.log`
 - Health webhook on exit **3** (hard) when `GROK_ALERT_WEBHOOK` set; exit **2** soft = log-only; `SuccessExitStatus=2 3`
+- Digest uses Telegram HTML cards (`skip_debounce`); optional `GROK_HOST_TAG`
 - Alert debounce: `GROK_ALERT_DEBOUNCE_MIN` (default 60)
 - Does **not** restart or stop `grok-farmer`
 
-Manual oneshot: `sudo systemctl start grok-farm-health.service` (or probe/reconcile/mark-expired)
+Manual oneshot: `sudo systemctl start grok-farm-health.service` (or probe/reconcile/mark-expired/digest)
 
 ---
 
@@ -286,7 +294,9 @@ Manual oneshot: `sudo systemctl start grok-farm-health.service` (or probe/reconc
 - [ ] `systemctl is-active grok-farm-probe.timer` → **active**
 - [ ] `systemctl is-active grok-farm-reconcile.timer` → **active**
 - [ ] `systemctl is-active grok-farm-mark-expired.timer` → **active**
+- [ ] `systemctl is-active grok-farm-digest.timer` → **active**
 - [ ] `bash scripts/health_check.sh` or oneshot unit; log in `logs/health_check.log`
+- [ ] `python daily_digest.py --dry-run` then oneshot digest; Telegram card received
 - [ ] Mid-drain or post-batch `SUMMARY N ok 0 fail`
 - [ ] 9router grok-cli connections grow
 - [ ] Grok model via non-EU proxy on gateway
