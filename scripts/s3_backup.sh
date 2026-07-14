@@ -37,11 +37,28 @@ export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 export AWS_EC2_METADATA_DISABLED=true
 
 HOST="$(hostname -s 2>/dev/null || hostname)"
+# Optional override when hostname != fleet tag (e.g. S3_HOST_KEY=grok4)
+HOST_KEY="${S3_HOST_KEY:-$HOST}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DAY="$(date -u +%Y-%m-%d)"
 WORK="$(mktemp -d /tmp/grok-farm-backup.XXXXXX)"
 cleanup() { find "$WORK" -mindepth 1 -delete 2>/dev/null || true; rmdir "$WORK" 2>/dev/null || true; }
 trap cleanup EXIT
+
+# S3 object root: avoid farm-vps/grokN/grokN when S3_PREFIX already ends with host key.
+# Accept either:
+#   S3_PREFIX=farm-vps          → s3://bucket/farm-vps/<host>/...
+#   S3_PREFIX=farm-vps/grok4    → s3://bucket/farm-vps/grok4/...  (no double host)
+S3_PREFIX="${S3_PREFIX%/}"
+if [[ -z "$S3_PREFIX" ]]; then
+  S3_PREFIX="farm-vps"
+fi
+if [[ "$S3_PREFIX" == "$HOST_KEY" || "$S3_PREFIX" == */"$HOST_KEY" ]]; then
+  HOST_ROOT="$S3_PREFIX"
+else
+  HOST_ROOT="${S3_PREFIX}/${HOST_KEY}"
+fi
+echo "S3 host root: ${HOST_ROOT} (prefix=${S3_PREFIX} host_key=${HOST_KEY})"
 
 STAGE="$WORK/payload"
 mkdir -p "$STAGE/credentials" "$STAGE/ssh" "$STAGE/app"
@@ -124,8 +141,8 @@ else
   exit 1
 fi
 
-KEY="s3://${S3_BUCKET}/${S3_PREFIX}/${HOST}/${DAY}/grok-farm-${HOST}-${STAMP}.${EXT}"
-LATEST="s3://${S3_BUCKET}/${S3_PREFIX}/${HOST}/latest.${EXT}"
+KEY="s3://${S3_BUCKET}/${HOST_ROOT}/${DAY}/grok-farm-${HOST_KEY}-${STAMP}.${EXT}"
+LATEST="s3://${S3_BUCKET}/${HOST_ROOT}/latest.${EXT}"
 
 echo "Upload $KEY"
 export S3_ENDPOINT S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
@@ -139,11 +156,12 @@ else
 fi
 $PYBIN "$PY_UPLOAD" "$UPLOAD_FILE" "$KEY" "$LATEST"
 echo "$STAMP $SIZE $KEY encrypt=$ENCRYPT" > "$WORK/LATEST.txt"
-$PYBIN "$PY_UPLOAD" "$WORK/LATEST.txt" "s3://${S3_BUCKET}/${S3_PREFIX}/${HOST}/LATEST.txt"
+$PYBIN "$PY_UPLOAD" "$WORK/LATEST.txt" "s3://${S3_BUCKET}/${HOST_ROOT}/LATEST.txt"
 echo "Upload OK"
 
 # Retention via boto3 (no aws CLI dependency)
-export RETENTION_DAYS S3_ENDPOINT S3_BUCKET S3_PREFIX HOST_NAME="$HOST"
+# HOST_ROOT is the full prefix under the bucket (no double host segment).
+export RETENTION_DAYS S3_ENDPOINT S3_BUCKET S3_PREFIX HOST_NAME="$HOST_KEY" S3_HOST_ROOT="$HOST_ROOT"
 $PYBIN "$PY_UPLOAD" --retention --days "${RETENTION_DAYS}" || echo "retention warning: non-zero exit (backup already uploaded)"
 
 echo "======== $(date -Is) backup done ========"

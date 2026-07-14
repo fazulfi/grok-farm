@@ -6,7 +6,9 @@ Usage:
   s3_upload.py --retention [--days N] [--prefix farm-vps/HOST/]
 
 Env: S3_ENDPOINT, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-Optional: AWS_DEFAULT_REGION, RETENTION_DAYS (default 14), S3_PREFIX, HOST_NAME
+Optional: AWS_DEFAULT_REGION, RETENTION_DAYS (default 14), S3_PREFIX,
+  HOST_NAME, S3_HOST_ROOT (full host root under bucket; preferred for retention
+  when set by s3_backup.sh — avoids farm-vps/grokN/grokN double segment)
 """
 from __future__ import annotations
 
@@ -88,12 +90,19 @@ def retention_cleanup(
     bucket = os.environ["S3_BUCKET"]
     s3_prefix = (os.environ.get("S3_PREFIX") or "farm-vps").strip().strip("/")
     host = (os.environ.get("HOST_NAME") or os.environ.get("HOSTNAME") or "").strip()
+    host_root = (os.environ.get("S3_HOST_ROOT") or "").strip().strip("/")
     if prefix:
         pref = prefix.lstrip("/")
         if not pref.endswith("/"):
             pref += "/"
+    elif host_root:
+        pref = f"{host_root}/"
     elif host:
-        pref = f"{s3_prefix}/{host}/"
+        # Avoid farm-vps/grokN/grokN when S3_PREFIX already ends with host.
+        if s3_prefix == host or s3_prefix.endswith(f"/{host}"):
+            pref = f"{s3_prefix}/"
+        else:
+            pref = f"{s3_prefix}/{host}/"
     else:
         pref = f"{s3_prefix}/"
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
