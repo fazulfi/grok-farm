@@ -19,6 +19,9 @@ All notable changes to Grok Farm are documented here.
   fail_class), host, batch; `skip_debounce=True`; never JWT/password; HUD
   remains primary UI; `alerts.send_alert(..., skip_debounce=)` +
   `format_email_list()`
+- **Telegram rich HTML cards:** `alerts.py` uses `parse_mode=HTML` with
+  emoji level header, bold title, key=value chips, `<code>` emails; plain
+  fallback if entities rejected; Discord keeps markdown; auto-load `.env`
 
 ### Changed
 
