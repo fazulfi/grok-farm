@@ -4,6 +4,16 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Planned
+
+- Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
+  `needs_relogin` (browser path optional) — **out of scope** for farm-only
+  roadmap until operator re-enables
+- Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
+  (never product auto-evict)
+
+## [2.3.1] — 2026-07-14
+
 ### Added
 
 - **Multi-VPS farmer fleet docs:** live inventory for DO hosts
@@ -29,20 +39,19 @@ All notable changes to Grok Farm are documented here.
   farm/inject ok level=`success`; `GROK_TELEGRAM_EFFECTS=0` to disable;
   effect stripped automatically if API rejects
 
+### Fixed
+
+- **S3 backup double host prefix:** when `S3_PREFIX=farm-vps/grokN`,
+  `s3_backup.sh` no longer appends `/hostname` again (was
+  `farm-vps/grokN/grokN/...`). Host root is now de-duplicated; retention uses
+  the same root via `S3_HOST_ROOT`. Optional `S3_HOST_KEY` if hostname ≠ tag.
+
 ### Changed
 
 - **8G fleet concurrent 3:** grok3/grok4/grok5 `GROK_CONCURRENT=3` (prod default
   with 8G swap); grok6 stays concurrent **1** (4G light)
 - **CSA retired** (`168.144.137.240`): production fleet is DO grok3–grok6 only;
   docs host maps updated (AGENTS / CAPACITY / OPERATIONS)
-
-### Planned
-
-- Re-farm / re-auth automation for `status=error` + `notes=token_expired` /
-  `needs_relogin` (browser path optional) — **out of scope** for farm-only
-  roadmap until operator re-enables
-- Gateway proxyPools auto-DELETE / `isActive=0` write-back — **manual/CLI only**
-  (never product auto-evict)
 
 ## [2.3.0] — 2026-07-14
 
