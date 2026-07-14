@@ -23,9 +23,9 @@
 
 | Tag | IP | Concurrent | Mid-drain | Notes |
 |-----|-----|------------|-----------|-------|
-| grok4 | `157.245.49.4` | 2 | 120s | mid-drain host (8G); S3 prefix `farm-vps/grok4` |
-| grok3 | `143.198.86.242` | 2 | off | post-batch inject (8G); `farm-vps/grok3` |
-| grok5 | `206.189.37.233` | 2–3 | off | post-batch inject (8G); `farm-vps/grok5` |
+| grok4 | `157.245.49.4` | **3** | 120s | mid-drain host (8G); S3 prefix `farm-vps/grok4` |
+| grok3 | `143.198.86.242` | **3** | off | post-batch inject (8G); `farm-vps/grok3` |
+| grok5 | `206.189.37.233` | **3** | off | post-batch inject (8G); `farm-vps/grok5` |
 | grok6 | `174.138.24.143` | **1** | off | **4G light** farmer; `farm-vps/grok6` |
 | ~~CSA~~ | `168.144.137.240` | — | — | **retired** 2026-07-14 |
 

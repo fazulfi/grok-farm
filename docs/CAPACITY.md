@@ -103,9 +103,9 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 
 | Tag | IP | Spec | Concurrent | Mid-drain | Notes |
 |-----|-----|------|------------|-----------|-------|
-| grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **2** | **120s** | only host with mid-drain |
-| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **2** | off | staggered inject |
-| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **2**–3 trial | off | staggered inject |
+| grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **3** | **120s** | only host with mid-drain |
+| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **3** | off | staggered inject |
+| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
 | grok6 | `174.138.24.143` | **2 vCPU / 4G / 120G** + 8G swap | **1** | off | light farmer only (not full 8G parity) |
 | grok2 | `157.245.149.116` | 4G | — | — | optional light; not required |
 | ~~CSA~~ | `168.144.137.240` | — | — | — | **retired** 2026-07-14 |

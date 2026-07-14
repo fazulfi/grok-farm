@@ -8,7 +8,7 @@ All notable changes to Grok Farm are documented here.
 
 - **Multi-VPS farmer fleet docs:** live inventory for DO hosts
   grok4/grok3/grok5/grok6 in `AGENTS.md` §3/§9, `docs/CAPACITY.md` §6.2,
-  `docs/OPERATIONS.md` §1 — 8G hosts concurrent 2 (mid-drain on grok4 only);
+  `docs/OPERATIONS.md` §1 — 8G hosts concurrent **3** (mid-drain on grok4 only);
   **grok6** 4G light concurrent **1**; key-only SSH; off-box farmer key backup
   for trial VPS
 - **Age/S3 backup on all DO farmers:** per-host
@@ -22,6 +22,8 @@ All notable changes to Grok Farm are documented here.
 
 ### Changed
 
+- **8G fleet concurrent 3:** grok3/grok4/grok5 `GROK_CONCURRENT=3` (prod default
+  with 8G swap); grok6 stays concurrent **1** (4G light)
 - **CSA retired** (`168.144.137.240`): production fleet is DO grok3–grok6 only;
   docs host maps updated (AGENTS / CAPACITY / OPERATIONS)
 
