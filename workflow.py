@@ -8,6 +8,15 @@ import random
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Ensure Telegram / webhook env available even if parent shell did not export .env
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+except ImportError:
+    pass
 
 from alerts import send_alert
 from db_schema import (

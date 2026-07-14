@@ -16,6 +16,38 @@ from log_redact import redact
 
 DEFAULT_DEBOUNCE_MIN = 60
 
+# Always load farm .env so workflow/health (no farm.py dotenv) still see Telegram keys.
+# Never logs secret values.
+def _load_farm_env() -> None:
+    root = Path(__file__).resolve().parent
+    env_path = root / ".env"
+    if not env_path.is_file():
+        farm = Path(os.path.expanduser(os.environ.get("GROK_FARM_DIR") or "~/grok-farm"))
+        env_path = farm / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+        return
+    except ImportError:
+        pass
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+    except OSError:
+        pass
+
+
+_load_farm_env()
+
 
 def webhook_url() -> Optional[str]:
     return os.environ.get("GROK_ALERT_WEBHOOK") or os.environ.get("GROK_FARM_ALERT_WEBHOOK")
@@ -185,6 +217,10 @@ def send_alert(
         sent = _send_telegram(tg_text) or sent
     if url:
         sent = _send_webhook(url, content, safe_title, safe_body, level, extra) or sent
+    if sent:
+        print(f"[ALERT] sent level={level} title={safe_title[:80]}", flush=True)
+    elif has_tg or url:
+        print(f"[ALERT] failed level={level} title={safe_title[:80]}", flush=True)
     return sent
 
 
