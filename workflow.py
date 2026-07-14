@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Optional
 
 # Ensure Telegram / webhook env available even if parent shell did not export .env
 try:
@@ -28,6 +29,52 @@ from db_schema import (
     record_proxy_result,
 )
 from log_redact import redact, redact_proxy_url, safe_print
+
+
+def _notify_inject_event(
+    title: str,
+    body: str,
+    *,
+    level: str = "info",
+    extra: Optional[dict] = None,
+    ok_emails: Optional[list] = None,
+    fail_emails: Optional[list] = None,
+    fail_class: str = "",
+) -> None:
+    """Refresh sticky ops dashboard (default) or send new alert if batch alerts on.
+
+    Never includes JWT/password (S7). HUD remains primary local UI.
+    """
+    extra = dict(extra or {})
+    ok_n = int(extra.get("ok") or (len(ok_emails) if ok_emails else 0) or 0)
+    fail_n = int(
+        extra.get("fail")
+        or extra.get("failed")
+        or (len(fail_emails) if fail_emails else 0)
+        or 0
+    )
+    try:
+        from daily_digest import batch_alerts_enabled, ops_dashboard_enabled, publish_ops_event
+
+        if ops_dashboard_enabled() and not batch_alerts_enabled():
+            publish_ops_event(
+                {
+                    "kind": "inject",
+                    "ok": ok_n,
+                    "fail": fail_n,
+                    "level": level,
+                    "title": title,
+                    "fail_class": fail_class or extra.get("fail_class") or "",
+                    "ok_emails": list(ok_emails or []),
+                    "fail_emails": list(fail_emails or []),
+                    "note": (body or "")[:200],
+                }
+            )
+            return
+    except Exception as e:
+        safe_print(f"[WORKFLOW] ops dashboard inject refresh failed: {e}")
+
+    send_alert(title, body, level=level, extra=extra, skip_debounce=True)
 from token_util import token_health, update_account_token_meta
 
 CSA_DB = os.path.expanduser(os.environ.get("GROK_AKUN_DB") or DEFAULT_DB)
@@ -175,7 +222,12 @@ def main() -> int:
     if not proxies:
         msg = "9router proxyPools empty — abort inject (no local proxy file fallback)"
         print(f"[WORKFLOW] FATAL: {msg}")
-        send_alert("inject aborted", msg, level="critical")
+        _notify_inject_event(
+            "inject aborted",
+            msg,
+            level="critical",
+            extra={"ok": 0, "fail": 1},
+        )
         return 1
     print(f"[WORKFLOW] Loaded {len(proxies)} proxies from 9router proxyPools")
 
@@ -255,7 +307,12 @@ def main() -> int:
     if not lines:
         print("[WORKFLOW] Nothing to inject")
         if skipped_bad:
-            send_alert("inject empty", f"skipped_bad={skipped_bad}", level="warning")
+            _notify_inject_event(
+                "inject empty",
+                f"skipped_bad={skipped_bad}",
+                level="warning",
+                extra={"ok": 0, "fail": skipped_bad},
+            )
         return 0
 
     data = "\n".join(lines) + "\n"
@@ -361,7 +418,7 @@ def main() -> int:
 
             body = "\n".join(body_parts)
             if failed and not ok_emails:
-                send_alert(
+                _notify_inject_event(
                     "inject all failed",
                     body,
                     level="critical",
@@ -372,10 +429,12 @@ def main() -> int:
                         "failed": len(fail_list),
                         "fail_class": fail_class,
                     },
-                    skip_debounce=True,
+                    ok_emails=[],
+                    fail_emails=fail_list,
+                    fail_class=fail_class or "",
                 )
             elif failed:
-                send_alert(
+                _notify_inject_event(
                     "inject partial",
                     body,
                     level="warning",
@@ -386,10 +445,12 @@ def main() -> int:
                         "failed": len(fail_list),
                         "fail_class": fail_class or "",
                     },
-                    skip_debounce=True,
+                    ok_emails=ok_list,
+                    fail_emails=fail_list,
+                    fail_class=fail_class or "",
                 )
             elif ok_emails:
-                send_alert(
+                _notify_inject_event(
                     "inject batch ok",
                     body,
                     level="success",
@@ -399,13 +460,19 @@ def main() -> int:
                         "fail": 0,
                         "created": len(ok_list),
                     },
-                    skip_debounce=True,
+                    ok_emails=ok_list,
+                    fail_emails=[],
                 )
         except Exception as ae:
             safe_print(f"[WORKFLOW] inject alert error: {ae}")
     except Exception as e:
         safe_print(f"[WORKFLOW] inject error: {e}")
-        send_alert("inject error", str(e), level="critical", skip_debounce=True)
+        _notify_inject_event(
+            "inject error",
+            str(e),
+            level="critical",
+            extra={"ok": 0, "fail": 1},
+        )
         return 1
     print(f"[WORKFLOW] Finished {now_iso()}")
     return 0
