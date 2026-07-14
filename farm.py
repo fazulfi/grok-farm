@@ -3122,15 +3122,10 @@ def _send_farm_batch_alert(
     failed_json: Path,
 ) -> None:
     """
-    End-of-batch farm alert with full account detail (emails + fail reasons).
-    Never includes password / access_token / refresh_token (S7).
-    skip_debounce so each batch notifies; HUD remains primary UI.
+    End-of-batch farm notify: default = refresh single sticky ops dashboard
+    (editMessageText). Optional GROK_BATCH_ALERTS=1 for legacy new messages.
+    Never includes password / access_token / refresh_token (S7). HUD remains UI #1.
     """
-    try:
-        from alerts import format_email_list, send_alert
-    except ImportError:
-        return
-
     import socket
 
     host = socket.gethostname()
@@ -3145,6 +3140,7 @@ def _send_farm_batch_alert(
         except Exception:
             pass
 
+    fail_emails: list[str] = []
     fail_lines: list[str] = []
     if failed_json.is_file():
         try:
@@ -3155,6 +3151,7 @@ def _send_farm_batch_alert(
                         continue
                     em = str(row.get("email") or "").strip() or f"attempt#{row.get('attempt', '?')}"
                     err = str(row.get("error") or "unknown")[:120]
+                    fail_emails.append(em)
                     fail_lines.append(f"  • {em} — {err}")
         except Exception:
             pass
@@ -3172,6 +3169,37 @@ def _send_farm_batch_alert(
         level = "warning"
         title = "farm batch empty"
 
+    # Prefer single sticky ops dashboard (per-batch edit, no spam)
+    try:
+        from daily_digest import batch_alerts_enabled, ops_dashboard_enabled, publish_ops_event
+
+        if ops_dashboard_enabled() and not batch_alerts_enabled():
+            publish_ops_event(
+                {
+                    "kind": "farm",
+                    "ok": created,
+                    "fail": failed,
+                    "level": level,
+                    "batch_id": batch_id,
+                    "title": title,
+                    "ok_emails": ok_emails,
+                    "fail_emails": fail_emails,
+                    "note": f"elapsed={elapsed_s}s host={host}",
+                }
+            )
+            return
+    except Exception as e:
+        try:
+            print(f"[ALERT] ops dashboard farm refresh failed: {e}", flush=True)
+        except Exception:
+            pass
+
+    # Legacy path: new Telegram message per batch (GROK_BATCH_ALERTS=1)
+    try:
+        from alerts import format_email_list, send_alert
+    except ImportError:
+        return
+
     body_parts = [
         f"host={host}",
         f"batch={batch_id}",
@@ -3184,7 +3212,6 @@ def _send_farm_batch_alert(
     if fail_lines:
         body_parts.append("")
         body_parts.append(f"FAILED ({len(fail_lines)}):")
-        # cap fail detail lines
         shown = fail_lines[:40]
         body_parts.extend(shown)
         if len(fail_lines) > 40:
