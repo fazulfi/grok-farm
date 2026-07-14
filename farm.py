@@ -3166,7 +3166,7 @@ def _send_farm_batch_alert(
         level = "warning"
         title = "farm batch partial"
     elif created:
-        level = "info"
+        level = "success"
         title = "farm batch ok"
     else:
         level = "warning"
@@ -3199,7 +3199,8 @@ def _send_farm_batch_alert(
             "batch_id": batch_id,
             "created": created,
             "failed": failed,
-            "ok_emails": ok_emails[:50],
+            "ok": created,
+            "fail": failed,
         },
         skip_debounce=True,
     )

@@ -365,7 +365,13 @@ def main() -> int:
                     "inject all failed",
                     body,
                     level="critical",
-                    extra={"host": host, "failed": fail_list[:50], "fail_class": fail_class},
+                    extra={
+                        "host": host,
+                        "ok": 0,
+                        "fail": len(fail_list),
+                        "failed": len(fail_list),
+                        "fail_class": fail_class,
+                    },
                     skip_debounce=True,
                 )
             elif failed:
@@ -373,15 +379,26 @@ def main() -> int:
                     "inject partial",
                     body,
                     level="warning",
-                    extra={"host": host, "ok": ok_list[:50], "failed": fail_list[:50]},
+                    extra={
+                        "host": host,
+                        "ok": len(ok_list),
+                        "fail": len(fail_list),
+                        "failed": len(fail_list),
+                        "fail_class": fail_class or "",
+                    },
                     skip_debounce=True,
                 )
             elif ok_emails:
                 send_alert(
                     "inject batch ok",
                     body,
-                    level="info",
-                    extra={"host": host, "ok": ok_list[:50]},
+                    level="success",
+                    extra={
+                        "host": host,
+                        "ok": len(ok_list),
+                        "fail": 0,
+                        "created": len(ok_list),
+                    },
                     skip_debounce=True,
                 )
         except Exception as ae:
