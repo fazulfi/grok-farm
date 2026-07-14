@@ -648,16 +648,19 @@ invisible; want **one** fleet summary/day.
    `GROK_FLEET_DIGEST_WAIT_SEC` (default 900) then posts **one** Telegram card
    with all hosts + fleet totals + worst proxies
 3. Followers upload only — no Telegram spam
-4. **Sticky card (default):** `editMessageText` on one `message_id`
-   (`send_or_edit_sticky`). State is **local**
+4. **Sticky card (default) — 1 pesan only:** `editMessageText` on one
+   `message_id` (`send_or_edit_sticky`). State is **local**
    (`~/.config/grok-farm/telegram_sticky_fleet_digest.json`) **and S3-shared**
    (`s3://…/farm-vps/fleet-digest/sticky_fleet_digest.json`) so **any host**
-   can edit the same card. First run sends; later runs edit.
-   `GROK_FLEET_DIGEST_STICKY=0` forces a new message. Effects only on brand-new send.
-5. **Ops dashboard (default ON, `GROK_OPS_DASHBOARD=1`):** farm/inject end-of-batch
-   calls `daily_digest.publish_ops_event` → upload snapshot with `last_event` →
-   refresh the **same** sticky card (no per-batch spam). Set `GROK_BATCH_ALERTS=1`
-   for legacy new Telegram messages per batch.
+   can edit the same card. First run sends; later runs edit. If edit fails,
+   bot **deletes** the old mid then sends one replacement (no stack of cards).
+   Effects only on brand-new send.
+5. **Ops dashboard UI (default ON, `GROK_OPS_DASHBOARD=1`):** true **dashboard**
+   layout (KPI / LIVE / HOSTS / PROXY) — not a key=value log dump. Soft
+   inventory noise collapsed. Farm/inject end-of-batch → `publish_ops_event`
+   refreshes the same sticky. **All** Telegram alerts (health hard too) also
+   route through sticky when dashboard is on. Set `GROK_BATCH_ALERTS=1` only
+   if you want legacy per-batch messages (not recommended).
 
 **Per-host card:** `python daily_digest.py --local` (or `GROK_FLEET_DIGEST=0`).
 
@@ -685,10 +688,11 @@ tail -50 ~/grok-farm/logs/daily_digest.log
 | Need | Action |
 |------|--------|
 | No message | Telegram env on hosts that refresh; S3 `backup.env` on all; smoke `python daily_digest.py --no-wait` or `publish_ops_event` |
-| Spam per batch | ensure `GROK_OPS_DASHBOARD=1` and `GROK_BATCH_ALERTS` unset/0; redeploy farm/workflow |
+| Spam / many messages | ensure `GROK_OPS_DASHBOARD=1` + `GROK_BATCH_ALERTS` unset/0; redeploy `alerts.py`+`daily_digest.py`; old mids deleted on recreate |
+| Looks like system log | redeploy dashboard formatter (`format_fleet_body` + `format_alert_html` dashboard mode) |
 | Four messages/day (timer) | fleet mode not `--local`; only leader sends daily; set `GROK_FLEET_DIGEST_LEADER_HOST` |
-| New message every run | sticky on; check local + S3 sticky key; edit fails → resend + new mid |
-| Want always new msg | `GROK_FLEET_DIGEST_STICKY=0` |
+| New message every run | sticky on; check local + S3 sticky key; edit fails → delete+resend one mid |
+| Want always new msg | `GROK_OPS_DASHBOARD=0` (disables sticky route; not recommended) |
 | Missing host in fleet card | S3 prefix `farm-vps/fleet-digest/DATE/`; raise wait; fix `GROK_HOST_TAG` |
 | Wrong host label | set `GROK_HOST_TAG=grokN` |
 | Empty proxy section | inject/farm must have written `proxy_stats` |
