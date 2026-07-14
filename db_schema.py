@@ -290,8 +290,12 @@ def record_proxy_result(
     fc = prev_fc + (0 if success else 1)
     cf = 0 if success else (prev_cf + 1)
     score = sc / max(sc + fc, 1)
-    # success re-enables auto-disabled proxies (manual disabled stays until operator clears)
-    new_disabled = 0 if success else disabled
+    thr = proxy_max_consecutive_fails()
+    # success clears soft disable; fail auto-disables when consecutive_fails hits thr
+    if success:
+        new_disabled = 0
+    else:
+        new_disabled = 1 if (disabled or cf >= thr) else 0
     if success:
         conn.execute(
             """UPDATE proxy_stats SET success_count=?, fail_count=?, consecutive_fails=?,
@@ -337,6 +341,165 @@ def proxies_to_skip(
         if disabled or cf >= thr:
             out.add(key)
     return out
+
+
+def list_soft_skipped_proxies(
+    conn: sqlite3.Connection,
+    max_consecutive: Optional[int] = None,
+) -> list[dict]:
+    """Rows that soft-skip would exclude (disabled or consecutive_fails >= thr).
+
+    Returns redacted dicts (proxy_key is host:port only — no credentials).
+    Never touches gateway proxyPools.
+    """
+    thr = max_consecutive if max_consecutive is not None else proxy_max_consecutive_fails()
+    out: list[dict] = []
+    try:
+        rows = conn.execute(
+            """SELECT proxy_key, success_count, fail_count, consecutive_fails,
+                      score, disabled, last_fail_reason, last_fail_at, updated_at
+               FROM proxy_stats
+               ORDER BY consecutive_fails DESC, score ASC"""
+        ).fetchall()
+    except sqlite3.Error:
+        return out
+    for r in rows:
+        try:
+            key = str(r["proxy_key"] if not isinstance(r, tuple) else r[0] or "")
+            cf = int((r["consecutive_fails"] if not isinstance(r, tuple) else r[3]) or 0)
+            disabled = int((r["disabled"] if not isinstance(r, tuple) else r[5]) or 0)
+            sc = int((r["success_count"] if not isinstance(r, tuple) else r[1]) or 0)
+            fc = int((r["fail_count"] if not isinstance(r, tuple) else r[2]) or 0)
+            score = float((r["score"] if not isinstance(r, tuple) else r[4]) or 0)
+            reason = str(
+                (r["last_fail_reason"] if not isinstance(r, tuple) else r[6]) or ""
+            )
+        except (TypeError, KeyError, IndexError, ValueError):
+            continue
+        if not key:
+            continue
+        if not (disabled or cf >= thr):
+            continue
+        why = []
+        if disabled:
+            why.append("disabled")
+        if cf >= thr:
+            why.append(f"cf>={thr}")
+        out.append(
+            {
+                "proxy_key": key,
+                "success_count": sc,
+                "fail_count": fc,
+                "consecutive_fails": cf,
+                "score": round(score, 3),
+                "disabled": disabled,
+                "last_fail_reason": reason[:64],
+                "skip_reason": ",".join(why) or "soft",
+            }
+        )
+    return out
+
+
+def reenable_proxy(
+    conn: sqlite3.Connection,
+    key_or_url: str,
+    *,
+    reset_consecutive: bool = True,
+    clear_fail_reason: bool = True,
+) -> Optional[str]:
+    """Clear soft-skip for one proxy (local akun.db only).
+
+    Matches exact proxy_key or substring of proxy_key (after proxy_key normalize).
+    Returns the re-enabled proxy_key, or None if no row matched.
+    Never deletes gateway proxyPools rows.
+    """
+    raw = (key_or_url or "").strip()
+    if not raw:
+        return None
+    want = proxy_key(raw) or raw
+    # Prefer exact key match first
+    row = conn.execute(
+        "SELECT proxy_key FROM proxy_stats WHERE proxy_key=?",
+        (want,),
+    ).fetchone()
+    if row is None:
+        # substring match (host:port fragment) — pick unique if possible
+        rows = conn.execute(
+            "SELECT proxy_key FROM proxy_stats WHERE proxy_key LIKE ?",
+            (f"%{want}%",),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            # exact-ish: prefer key ending with want or equal host
+            keys = [str(r["proxy_key"] if not isinstance(r, tuple) else r[0]) for r in rows]
+            exact = [k for k in keys if want in k]
+            if len(exact) == 1:
+                key = exact[0]
+            else:
+                # ambiguous — re-enable all matching? caller should use list first
+                key = keys[0]
+        else:
+            key = str(rows[0]["proxy_key"] if not isinstance(rows[0], tuple) else rows[0][0])
+    else:
+        key = str(row["proxy_key"] if not isinstance(row, tuple) else row[0])
+    sets = ["disabled=0"]
+    if reset_consecutive:
+        sets.append("consecutive_fails=0")
+    if clear_fail_reason:
+        sets.append("last_fail_reason=NULL")
+    sets.append("updated_at=CURRENT_TIMESTAMP")
+    conn.execute(
+        f"UPDATE proxy_stats SET {', '.join(sets)} WHERE proxy_key=?",
+        (key,),
+    )
+    return key
+
+
+def reenable_proxies(
+    conn: sqlite3.Connection,
+    *,
+    match: str = "",
+    all_skipped: bool = False,
+    reset_consecutive: bool = True,
+    max_consecutive: Optional[int] = None,
+) -> list[str]:
+    """Re-enable soft-skipped proxies. Local DB only; never gateway DELETE.
+
+    - all_skipped=True: every currently soft-skipped row
+    - match: substring of proxy_key (required if not all_skipped)
+    Returns list of re-enabled proxy_keys.
+    """
+    thr = max_consecutive if max_consecutive is not None else proxy_max_consecutive_fails()
+    reenabled: list[str] = []
+    if all_skipped:
+        skipped = list_soft_skipped_proxies(conn, max_consecutive=thr)
+        for item in skipped:
+            k = reenable_proxy(
+                conn,
+                item["proxy_key"],
+                reset_consecutive=reset_consecutive,
+            )
+            if k:
+                reenabled.append(k)
+        return reenabled
+    m = (match or "").strip()
+    if not m:
+        return reenabled
+    # re-enable all rows matching substring that are currently skipped OR any match
+    want = proxy_key(m) or m
+    rows = conn.execute(
+        "SELECT proxy_key, consecutive_fails, disabled FROM proxy_stats WHERE proxy_key LIKE ?",
+        (f"%{want}%",),
+    ).fetchall()
+    for r in rows:
+        key = str(r["proxy_key"] if not isinstance(r, tuple) else r[0] or "")
+        if not key:
+            continue
+        k = reenable_proxy(conn, key, reset_consecutive=reset_consecutive)
+        if k:
+            reenabled.append(k)
+    return reenabled
 
 
 def record_domain_result(
