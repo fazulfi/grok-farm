@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optional webhook / Telegram alerts (Discord-compatible + Bot API HTML cards)."""
+"""Optional webhook / Telegram alerts (Discord-compatible + Bot API HTML cards + effects)."""
 from __future__ import annotations
 
 import hashlib
@@ -25,6 +25,35 @@ LEVEL_META: dict[str, tuple[str, str]] = {
     "critical": ("🔴", "CRIT"),
     "error": ("🔴", "ERROR"),
     "debug": ("⚪", "DEBUG"),
+}
+
+# Telegram private-chat message_effect_id (animated full-screen effect on send).
+# Only FREE effects (no Telegram Premium on recipient). Probed 2026-07-14 against
+# chat 1812698903: party/fire/thumbs/poop = OK; sparkle/lightning/boom/trophy/etc =
+# PREMIUM_ACCOUNT_REQUIRED.
+LEVEL_EFFECT: dict[str, str] = {
+    "success": "5046509860389126442",  # 🎉 party
+    "info": "5107584321108051014",  # 👍 thumbs
+    "warning": "5104841245755180586",  # 🔥 fire
+    "critical": "5104841245755180586",  # 🔥 fire
+    "error": "5104841245755180586",  # 🔥 fire
+    "debug": "5107584321108051014",  # 👍 thumbs
+}
+
+# Section header emoji banners (animation-feel without CSS)
+SECTION_EMOJI = {
+    "ok": "✅",
+    "success": "✅",
+    "fail": "❌",
+    "failed": "❌",
+    "error": "❌",
+    "warn": "⚠️",
+    "warning": "⚠️",
+    "host": "🖥️",
+    "batch": "📦",
+    "proxy": "🌐",
+    "inject": "💉",
+    "farm": "🌾",
 }
 
 # Telegram HTML: escape user-controlled text before wrapping tags
@@ -86,6 +115,18 @@ def telegram_chat_id() -> Optional[str]:
     return c or None
 
 
+def _effects_enabled() -> bool:
+    """GROK_TELEGRAM_EFFECTS=0|false|off disables message_effect_id."""
+    raw = (os.environ.get("GROK_TELEGRAM_EFFECTS") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _effect_for_level(level: str) -> Optional[str]:
+    if not _effects_enabled():
+        return None
+    return LEVEL_EFFECT.get((level or "info").lower())
+
+
 def _debounce_minutes() -> int:
     raw = (os.environ.get("GROK_ALERT_DEBOUNCE_MIN") or "").strip()
     try:
@@ -144,7 +185,7 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float = 15) -> bool:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "grok-farm-alerts/1.2"},
+        headers={"Content-Type": "application/json", "User-Agent": "grok-farm-alerts/1.3"},
         method="POST",
     )
     try:
@@ -179,6 +220,15 @@ def format_email_list(
     return lines
 
 
+def _status_bar(ok: int, fail: int, width: int = 10) -> str:
+    """Unicode progress bar for ok vs fail counts (visual, not animated)."""
+    total = max(0, int(ok)) + max(0, int(fail))
+    if total <= 0:
+        return "░" * width
+    filled = min(width, max(0, round(width * int(ok) / total)))
+    return "█" * filled + "░" * (width - filled)
+
+
 def format_alert_plain(title: str, body: str, level: str) -> str:
     """Plain-text card (Discord-friendly markdown + Telegram fallback)."""
     emoji, label = LEVEL_META.get(level.lower(), ("ℹ️", level.upper()))
@@ -187,6 +237,18 @@ def format_alert_plain(title: str, body: str, level: str) -> str:
     if not body:
         return header
     return f"{header}\n{'─' * 22}\n{body}"
+
+
+def _section_banner(stripped: str) -> Optional[str]:
+    """Map section headers like 'OK accounts (2):' to emoji banner line."""
+    low = stripped.lower()
+    for key, emo in SECTION_EMOJI.items():
+        if low.startswith(key) or f" {key}" in low[:24]:
+            return f"{emo} <b>{html_escape(stripped)}</b>"
+    # Generic section ending with :
+    if stripped.endswith(":") and not stripped.startswith("•"):
+        return f"▸ <b>{html_escape(stripped)}</b>"
+    return None
 
 
 def format_alert_html(
@@ -198,28 +260,50 @@ def format_alert_html(
     """
     Rich HTML card for Telegram parse_mode=HTML.
     Escapes all user content; never embeds JWT/password (caller must redact).
+    Uses blockquote meta strip + section banners + optional status bar for denser UX.
     """
     emoji, label = LEVEL_META.get(level.lower(), ("ℹ️", level.upper()))
     parts: list[str] = [
         f"<b>{emoji} {html_escape(label)} · Grok Farm</b>",
         f"<b>{html_escape(title)}</b>",
-        "────────────────────",
     ]
 
-    # Optional structured chips from extra (host / batch / counts)
-    chips: list[str] = []
+    # Meta strip as blockquote (Telegram renders with left accent bar — more “UI”)
+    meta_lines: list[str] = []
     if extra:
-        for key in ("host", "batch_id", "created", "failed", "fail_class"):
+        for key, icon in (
+            ("host", "🖥️"),
+            ("batch_id", "📦"),
+            ("created", "✅"),
+            ("failed", "❌"),
+            ("fail_class", "🏷️"),
+            ("ok", "✅"),
+            ("fail", "❌"),
+        ):
             if key in extra and extra[key] is not None and str(extra[key]) != "":
-                chips.append(
-                    f"<b>{html_escape(key)}</b>=<code>{html_escape(str(extra[key])[:80])}</code>"
+                meta_lines.append(
+                    f"{icon} <b>{html_escape(key)}</b> "
+                    f"<code>{html_escape(str(extra[key])[:80])}</code>"
                 )
-    if chips:
-        parts.append(" · ".join(chips))
-        parts.append("")
+        # Status bar when we have ok/fail or created/failed counts
+        try:
+            ok_n = int(extra.get("ok") or extra.get("created") or 0)
+            fail_n = int(extra.get("fail") or extra.get("failed") or 0)
+            if ok_n or fail_n:
+                bar = _status_bar(ok_n, fail_n)
+                meta_lines.append(
+                    f"📊 <code>{bar}</code> "
+                    f"<b>{ok_n}</b> ok · <b>{fail_n}</b> fail"
+                )
+        except (TypeError, ValueError):
+            pass
+    if meta_lines:
+        # Telegram HTML supports <blockquote> (Bot API 7.0+)
+        parts.append("<blockquote>" + "\n".join(meta_lines) + "</blockquote>")
+    else:
+        parts.append("────────────────────")
 
-    # Body lines: key=value → bold key + code value; section headers → bold; bullets → email in code
-    # Multi-token lines like "created=2 failed=1 elapsed=90s" are split into chips
+    # Body lines: key=value → bold key + code value; section headers → banner; bullets → email in code
     kv_token_re = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=([^\s]+)")
     section_re = re.compile(r"^[A-Za-z].*\):$|^[A-Za-z].*:$")
     for raw_line in (body or "").splitlines():
@@ -230,7 +314,8 @@ def format_alert_html(
         stripped = line.strip()
         # Section headers from farm/workflow ("OK accounts (2):", "FAILED (1):")
         if section_re.match(stripped) and not stripped.startswith("•") and "=" not in stripped:
-            parts.append(f"<b>{html_escape(stripped)}</b>")
+            banner = _section_banner(stripped)
+            parts.append(banner or f"<b>{html_escape(stripped)}</b>")
             continue
         # Bullet lines (account lists / fail detail) — highlight first email in <code>
         if stripped.startswith("•") or stripped.startswith("…") or stripped.startswith("..."):
@@ -270,7 +355,12 @@ def format_alert_html(
     return text
 
 
-def _send_telegram(text: str, *, parse_mode: Optional[str] = None) -> bool:
+def _send_telegram(
+    text: str,
+    *,
+    parse_mode: Optional[str] = None,
+    message_effect_id: Optional[str] = None,
+) -> bool:
     """Send via Telegram Bot API when token + chat_id are set. Never logs token."""
     token = telegram_bot_token()
     chat_id = telegram_chat_id()
@@ -284,19 +374,38 @@ def _send_telegram(text: str, *, parse_mode: Optional[str] = None) -> bool:
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if message_effect_id:
+        payload["message_effect_id"] = str(message_effect_id)
     ok = _post_json(url, payload)
+    if not ok and message_effect_id:
+        # Effects only work in private chats; retry without effect if rejected
+        payload.pop("message_effect_id", None)
+        ok = _post_json(url, payload)
+        if ok:
+            print("[ALERT] telegram effect unsupported — sent without effect", flush=True)
+            return True
     if not ok:
         print("[ALERT] telegram sendMessage failed (token/chat_id redacted)")
     return ok
 
 
-def _send_telegram_rich(html_text: str, plain_text: str) -> bool:
-    """Prefer HTML card; fall back to plain if Telegram rejects entities."""
-    if _send_telegram(html_text, parse_mode="HTML"):
+def _send_telegram_rich(
+    html_text: str,
+    plain_text: str,
+    *,
+    level: str = "info",
+) -> bool:
+    """Prefer HTML card + effect; fall back to plain / no-effect if Telegram rejects."""
+    effect = _effect_for_level(level)
+    if _send_telegram(html_text, parse_mode="HTML", message_effect_id=effect):
+        return True
+    # Retry HTML without effect
+    if effect and _send_telegram(html_text, parse_mode="HTML", message_effect_id=None):
+        print("[ALERT] telegram HTML ok without effect", flush=True)
         return True
     # Retry without parse_mode (bad entities / unexpected tags)
     print("[ALERT] telegram HTML rejected — falling back to plain text")
-    return _send_telegram(plain_text, parse_mode=None)
+    return _send_telegram(plain_text, parse_mode=None, message_effect_id=None)
 
 
 def _send_webhook(
@@ -324,6 +433,7 @@ def _send_webhook(
             print("[ALERT] telegram webhook URL missing chat_id")
             return False
         base = url.split("?")[0]
+        effect = _effect_for_level(level)
         # Prefer HTML via webhook path too
         if html_text:
             payload_html: dict[str, Any] = {
@@ -332,8 +442,14 @@ def _send_webhook(
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
+            if effect:
+                payload_html["message_effect_id"] = effect
             if _post_json(base, payload_html):
                 return True
+            if effect:
+                payload_html.pop("message_effect_id", None)
+                if _post_json(base, payload_html):
+                    return True
         payload: dict[str, Any] = {
             "chat_id": chat,
             "text": (plain_text or content)[:4000],
@@ -366,10 +482,11 @@ def send_alert(
     """
     Fire alert if Telegram (token+chat_id) and/or GROK_ALERT_WEBHOOK is set.
     Discord: markdown content with emoji level.
-    Telegram: HTML card (parse_mode=HTML) with plain fallback.
-    Never includes raw JWTs — body is redacted. Never logs bot token.
+    Telegram: HTML card (parse_mode=HTML) + optional message_effect_id animation,
+    plain fallback. Never includes raw JWTs — body is redacted. Never logs bot token.
     Debounce: GROK_ALERT_DEBOUNCE_MIN (default 60) minutes per title+issues fingerprint.
     Per-batch farm/inject detail should pass skip_debounce=True so each batch notifies.
+    Effects: GROK_TELEGRAM_EFFECTS=0 disables private-chat animation effects.
     """
     url = webhook_url()
     has_tg = bool(telegram_bot_token() and telegram_chat_id())
@@ -386,7 +503,7 @@ def send_alert(
 
     sent = False
     if has_tg:
-        sent = _send_telegram_rich(html, plain) or sent
+        sent = _send_telegram_rich(html, plain, level=level) or sent
     if url:
         sent = (
             _send_webhook(
