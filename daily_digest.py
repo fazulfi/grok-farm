@@ -833,12 +833,22 @@ def main() -> int:
             leader=host,
         )
         level = pick_fleet_level(snaps)
-        from alerts import send_alert
+        # Sticky live card: editMessageText same message_id (1 fleet card, updates in place)
+        from alerts import send_or_edit_sticky
 
-        ok = send_alert(title, body, level=level, extra=extra, skip_debounce=True)
+        sticky = (os.environ.get("GROK_FLEET_DIGEST_STICKY") or "1").strip().lower()
+        force_new = sticky in ("0", "false", "off", "no")
+        ok = send_or_edit_sticky(
+            title,
+            body,
+            level=level,
+            extra=extra,
+            sticky_name="fleet_digest",
+            force_new=force_new,
+        )
         print(
             f"[daily_digest] FLEET host={host} level={level} "
-            f"hosts={len(snaps)} missing={missing} alert_sent={ok}",
+            f"hosts={len(snaps)} missing={missing} sticky={not force_new} alert_sent={ok}",
             flush=True,
         )
         return 0 if ok else 2
