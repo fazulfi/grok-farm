@@ -16,7 +16,7 @@
 
 **Repo:** private `fazulfi/grok-farm`  
 **Code pin:** `v2.3.2`+ / `main`  
-**Live fleet (update when moved):** grok4 `157.245.49.4` · grok3 `143.198.86.242` · grok5 `206.189.37.233` · grok6 `174.138.24.143` · user `magadirxwin` · gateway `49.12.82.34:39999`  
+**Live fleet (update when moved):** grok4 `157.245.49.4` · grok3 `143.198.86.242` · grok5 `206.189.37.233` · grok6 `174.138.24.143` · grok7 `157.245.199.70` · user `magadirxwin` · gateway `49.12.82.34:39999`  
 **Retired:** CSA `168.144.137.240` (2026-07-14)
 ### Quick DR
 

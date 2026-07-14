@@ -1,7 +1,7 @@
 # Migration Playbook — VPS Death / Rebuild
 
 **Audience:** on-call / operator  
-**Last proven:** 2026-07-14 — multi-VPS DO fleet (grok3–grok6) with age/S3 per-host prefixes; CSA `168.144.137.240` **retired**  
+**Last proven:** 2026-07-14 — multi-VPS DO fleet (grok3–grok7) with age/S3 per-host prefixes; CSA `168.144.137.240` **retired**  
 **Historical:** 2026-07-13 — old CSA `152.42.242.192` → `168.144.137.240` (now retired)  
 **RTO target:** < 45 min with age backup; < 90 min rebuild from 9router only  
 **RPO:** last successful inject to 9router (tokens live on gateway even if farm disk is gone)
@@ -30,7 +30,7 @@ Related: [DEPLOYMENT.md](./DEPLOYMENT.md) · [RUNBOOK.md](./RUNBOOK.md) R16 · [
 
 | Role | Current (2026-07-14) | Notes |
 |------|----------------------|--------|
-| Farm fleet | **grok4** `157.245.49.4` · **grok3** `143.198.86.242` · **grok5** `206.189.37.233` · **grok6** `174.138.24.143` | DO SGP1; 8G concurrent 2 (grok5 trial 3); grok6 4G light concurrent 1 |
+| Farm fleet | **grok4** `157.245.49.4` · **grok3** `143.198.86.242` · **grok5** `206.189.37.233` · **grok6** `174.138.24.143` · **grok7** `157.245.199.70` | DO SGP1; 8G concurrent **3** (mid-drain grok4 only); grok6 4G light concurrent **1** |
 | Farm user | `magadirxwin` (non-root) | Camoufox **must not** run as root |
 | App dir | `/home/magadirxwin/grok-farm` | per host |
 | DB | `~/grok-farm/akun.db` mode **600** | **per-host** (not shared) |
@@ -38,7 +38,7 @@ Related: [DEPLOYMENT.md](./DEPLOYMENT.md) · [RUNBOOK.md](./RUNBOOK.md) R16 · [
 | Proxy SoT | 9router **`proxyPools`** | Sync → `usa_proxies.txt` |
 | Backup S3 | `s3://grok-farm/farm-vps/grok{N}/…` | age encrypt; `backup.env` per host |
 | Domains | `budgezen.com` + `mypapyr.com` | Pattern B → two Gmails |
-| Code pin | tag **`v2.3.0`+** / `main` | Prefer release tag |
+| Code pin | tag **`v2.3.2`+** / `main` | Prefer release tag |
 
 Retired / do not target as production: CSA `168.144.137.240`, old `152.42.242.192` (`csa-old`).
 
