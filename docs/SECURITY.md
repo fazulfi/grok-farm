@@ -114,11 +114,13 @@ Optional channels (either or both). Wired in:
   `logs/alert_debounce/`).
 - **`daily_digest.py`** via `grok-farm-digest.timer` — daily health + proxy
   dashboard HTML card (`skip_debounce`); proxy keys redacted; **no** JWT/password.
+  Fleet leader uses sticky `editMessageText` (state file mode **600** under
+  `~/.config/grok-farm/telegram_sticky_*.json`).
 
 | Channel | Env | Notes |
 |---------|-----|-------|
 | Discord-style webhook | `GROK_ALERT_WEBHOOK` / `GROK_FARM_ALERT_WEBHOOK` | JSON `{"content":...}` |
-| Telegram Bot API | `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID` | `sendMessage`; **never** log/commit token |
+| Telegram Bot API | `GROK_TELEGRAM_BOT_TOKEN` + `GROK_TELEGRAM_CHAT_ID` | `sendMessage` / sticky `editMessageText`; **never** log/commit token |
 
 **Do not invent a fake webhook** — leave unset if unused.
 
@@ -130,9 +132,10 @@ Optional channels (either or both). Wired in:
 # GROK_TELEGRAM_CHAT_ID=
 # GROK_ALERT_DEBOUNCE_MIN=60
 # GROK_HOST_TAG=grok4   # optional digest title label
+# GROK_FLEET_DIGEST_STICKY=1
 ```
 
-Bodies pass through `log_redact` (no full JWT / proxy user:pass / bot token). Health timer posts only hard issue codes + account counts (no tokens). Digest posts redacted proxy keys + account counts only.
+Bodies pass through `log_redact` (no full JWT / proxy user:pass / bot token). Health timer posts only hard issue codes + account counts (no tokens). Digest posts redacted proxy keys + account counts only. Sticky state stores `message_id` + `chat_id` only (no tokens).
 
 ### Windows age CLI (operator laptop)
 

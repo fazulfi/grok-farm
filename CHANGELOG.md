@@ -6,6 +6,14 @@ All notable changes to Grok Farm are documented here.
 
 ### Added
 
+- **Proxy re-enable CLI:** `reenable_proxy.py` (`--list` / `--match` / `--all` /
+  `--dry-run`) + `db_schema.list_soft_skipped_proxies` / `reenable_proxy` /
+  `reenable_proxies`. Local `proxy_stats` only — **never** gateway DELETE.
+  Fail path auto-sets `disabled=1` when `consecutive_fails >= thr`. RUNBOOK **R18**.
+- **Sticky fleet digest Telegram card:** leader uses `editMessageText` via
+  `alerts.send_or_edit_sticky` so daily fleet digest **updates one message**
+  instead of spamming. State: `~/.config/grok-farm/telegram_sticky_fleet_digest.json`
+  (chmod 600). `GROK_FLEET_DIGEST_STICKY=0` forces new message. RUNBOOK **R20**.
 - **grok7 farmer host:** `157.245.199.70` (8G, concurrent **3**, mid-drain off,
   batch prefix `g7`); age/S3 prefix `farm-vps/grok7`; fleet digest hosts list
   includes grok7 (leader remains grok3). Inventory docs: AGENTS §3/§9,
