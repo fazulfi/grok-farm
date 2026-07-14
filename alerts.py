@@ -954,17 +954,40 @@ def send_alert(
     html = format_alert_html(safe_title, safe_body, level, extra)
 
     sent = False
-    # Single-message Telegram mode (ops dashboard sticky)
+    # Global fleet dashboard only: never paint sticky with per-host title/body
+    # (that made chat look like "per VPS" cards). Refresh aggregated fleet card.
     if has_tg and _ops_dashboard_env_on():
-        sticky_ok = send_or_edit_sticky(
-            title,
-            body,
-            level=level,
-            extra=extra,
-            sticky_name=_default_sticky_name(),
-            force_new=False,
-        )
-        sent = sticky_ok or sent
+        try:
+            from daily_digest import publish_ops_event
+
+            ok_n = 0
+            fail_n = 0
+            if isinstance(extra, dict):
+                try:
+                    ok_n = int(extra.get("ok") or extra.get("created") or 0)
+                    fail_n = int(extra.get("fail") or extra.get("failed") or 0)
+                except (TypeError, ValueError):
+                    pass
+            sticky_ok = publish_ops_event(
+                {
+                    "kind": str((extra or {}).get("source") or "alert")[:40],
+                    "ok": ok_n,
+                    "fail": fail_n,
+                    "level": level,
+                    "title": title[:120],
+                    "note": (body or "")[:200],
+                    "fail_class": str((extra or {}).get("fail_class") or "")[:80],
+                }
+            )
+            sent = sticky_ok or sent
+            if sticky_ok:
+                print(
+                    f"[ALERT] global dashboard refresh level={level} title={safe_title[:60]}",
+                    flush=True,
+                )
+        except Exception as e:
+            print(f"[ALERT] global dashboard refresh failed: {redact(e)}", flush=True)
+            # Do NOT fallback to local sticky body — keeps 1 global fleet card pure
     elif has_tg:
         ok_tg, _mid = _send_telegram_rich(html, plain, level=level)
         sent = ok_tg or sent
