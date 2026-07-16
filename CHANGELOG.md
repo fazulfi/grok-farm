@@ -10,8 +10,9 @@ All notable changes to Grok Farm are documented here.
   fleet: `grok2` `157.245.55.62`, `grok3` `168.144.36.46`, `grok4`
   `104.248.157.41`, `grok5` `168.144.37.202`, `grok6` `167.71.208.99`
   (all concurrent **3**; mid-drain only grok4; digest leader grok3). OTP
-  domains `markettabrak.my.id` + `markettabrak.site`. Inventory docs
-  AGENTS/CAPACITY/OPERATIONS/DEPLOYMENT updated.
+  domains (3): `markettabrak.biz.id` + `markettabrak.my.id` +
+  `markettabrak.site` (Pattern B multi-IMAP). Dead hosts/domains purged from
+  inventory docs (AGENTS/CAPACITY/OPERATIONS/DEPLOYMENT/MIGRATION).
 
 ### Added
 
@@ -32,10 +33,6 @@ All notable changes to Grok Farm are documented here.
   alerts (health hard included) call `publish_ops_event` → aggregate S3
   snapshots → edit the **same** sticky mid (1 message only; delete orphan on
   recreate). Title: `Grok Farm · Fleet dashboard · YYYY-MM-DD`. RUNBOOK **R20**.
-- **grok7 farmer host:** `157.245.199.70` (8G, concurrent **3**, mid-drain off,
-  batch prefix `g7`); age/S3 prefix `farm-vps/grok7`; fleet digest hosts list
-  includes grok7 (leader remains grok3). Inventory docs: AGENTS §3/§9,
-  CAPACITY §6.2, OPERATIONS, DEPLOYMENT, MIGRATION, docs/README.
 
 ### Planned
 
