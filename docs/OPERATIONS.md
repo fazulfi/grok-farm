@@ -29,7 +29,8 @@
 | grok4 | `104.248.157.41` | **3** | 120s | mid-drain host; `farm-vps/grok4` |
 | grok5 | `168.144.37.202` | **3** | off | `farm-vps/grok5` |
 | grok6 | `167.71.208.99` | **3** | off | `farm-vps/grok6` |
-| ~~CSA / prior trial~~ | old IPs | — | — | retired / dead |
+
+OTP domains (live, 3): `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` (Pattern B multi-IMAP).
 
 User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 
@@ -216,12 +217,12 @@ python3 check_status.py
 ```bash
 # On farm VPS as farmer user
 cd ~/grok-farm
-# Example: add mypapyr.com beside budgezen.com
+# Example: live production pool (update when domains change)
 grep -q '^GROK_EMAIL_DOMAINS=' .env \
-  && sed -i 's|^GROK_EMAIL_DOMAINS=.*|GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com|' .env \
-  || echo 'GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com' >> .env
+&& sed -i 's|^GROK_EMAIL_DOMAINS=.*|GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site|' .env \
+|| echo 'GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site' >> .env
 # Keep legacy key in sync (optional)
-sed -i 's|^GROK_EMAIL_DOMAIN=.*|GROK_EMAIL_DOMAIN=budgezen.com|' .env
+sed -i 's|^GROK_EMAIL_DOMAIN=.*|GROK_EMAIL_DOMAIN=markettabrak.my.id|' .env
 # Strategy: round_robin (recommended) = A,B,A,B… across healthy domains
 #            random      = weighted random (identity.weight)
 grep -q '^GROK_EMAIL_DOMAIN_STRATEGY=' .env \
@@ -293,7 +294,7 @@ python3 check_status.py
 # expect: identity domains=2 pool lists both; strategy=round_robin
 # domain_stats: tracks OTP/farm success; auto-skips dead domains after consecutive fails
 # After picks: alternate domains in farm.log (round_robin)
-tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|mypapyr|budgezen'
+tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|markettabrak'
 ```
 
 #### Domain health auto-skip
@@ -302,7 +303,7 @@ tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|mypapyr|budge
 - After `GROK_DOMAIN_MAX_CONSECUTIVE_FAILS` (default 3) consecutive fails, domain is skipped on pick.
 - If **all** pool domains would be skipped → fail-open (still pick from full pool).
 - Re-enable after routing fix: RUNBOOK **R3d** SQL or remove domain from pool until IMAP probe green.
-- CSA ops note (2026-07-13): mypapyr.com catch-all claimed Active but zero xAI `To:` in IMAP — pool temporarily `budgezen.com` only until R3c green.
+- Do **not** assume Cloudflare UI “Active” means OTP inbox receives xAI mail — always verify with IMAP probe (R3c).
 
 #### Multi-Gmail (optional Pattern B)
 

@@ -12,7 +12,7 @@
 | Disk | 150+ GB SSD |
 | Network | 1 Gbps class VPS |
 
-**Live production (2026-07-14):** DO fleet grok3–grok7. Legacy CSA (`168.144.137.240`) **retired**.
+**Live production (2026-07-16):** DO SGP1 fleet **grok2–grok6** (5×8G, concurrent **3** each).
 
 ---
 
@@ -108,10 +108,8 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 | grok4 | `104.248.157.41` | 4 vCPU / 8G / 160G | **3** | **120s** | only host with mid-drain |
 | grok5 | `168.144.37.202` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
 | grok6 | `167.71.208.99` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
-| ~~Prior trial fleet~~ | old IPs (2026-07-14) | — | — | — | **dead** 2026-07-15; replaced |
-| ~~CSA~~ | `168.144.137.240` | — | — | — | **retired** 2026-07-14 |
 
-OTP domains: `markettabrak.my.id` + `markettabrak.site` (CF → Gmail). budgezen/mypapyr retired (421).
+OTP domains (live, 3): `markettabrak.biz.id` + `markettabrak.my.id` + `markettabrak.site` (CF Email Routing → Gmail Pattern B).
 
 **Must on every farmer host:**
 

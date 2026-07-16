@@ -84,7 +84,7 @@ nano .env
 | `GROK_IMAP_USER` | primary Gmail |
 | `GROK_IMAP_PASS` | App Password (spaces OK; strip if needed) |
 | `GROK_EMAIL_MODE` | `domain` |
-| `GROK_EMAIL_DOMAINS` | `budgezen.com,mypapyr.com` |
+| `GROK_EMAIL_DOMAINS` | `markettabrak.biz.id,markettabrak.my.id,markettabrak.site` |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `round_robin` |
 | `GROK_PASSWORD` | **Single-quoted** if contains `#` `&` `!` |
 | `GROK_HEADLESS` | `true` on VPS |
@@ -102,7 +102,7 @@ Multi-Gmail Pattern B:
 ```bash
 cp identities.example.json identities.json
 chmod 600 identities.json
-# edit: primary domains=[budgezen.com], secondary domains=[mypapyr.com] enabled=true
+# edit: biz.id / my.id / site → three Gmail app passwords (Pattern B identities.json)
 ```
 
 See RUNBOOK **R11** and MIGRATION §5 B.4.
@@ -322,7 +322,7 @@ git fetch --tags && git checkout main   # or newer tag when released
 | grok5 | `168.144.37.202` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok5` |
 | grok6 | `167.71.208.99` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok6` |
 | Gateway | `49.12.82.34:39999` | root (SSH) | proxyPools + inject |
-| ~~CSA / prior trial~~ | old IPs | — | retired / dead 2026-07-15 |
+| OTP domains | `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` | CF → Gmail | live pool (3) Pattern B |
 
 Multi-VPS sizing + mid-drain rules: [CAPACITY.md](./CAPACITY.md) §6.2. Agent host map: `AGENTS.md` §3 / §9.
 
