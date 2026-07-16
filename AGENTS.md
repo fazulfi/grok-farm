@@ -72,9 +72,7 @@ WebShare / 9router proxyPools (non-EU) → Farm VPS (non-root user)
 | Farmer fleet (production DO SGP1) | `grok2` `157.245.55.62` · `grok3` `168.144.36.46` · `grok4` `104.248.157.41` · `grok5` `168.144.37.202` · `grok6` `167.71.208.99` | `magadirxwin` | all **8G** concurrent **3**; mid-drain only **grok4**; digest leader **grok3**; key-only SSH |
 | Gateway | 9router `49.12.82.34:39999` | SSH for inject/sync | HTTP API often `20128` |
 | Backup | S3 `s3://grok-farm/farm-vps/grok{N}/...` on `is3.cloudhost.id` | keys + age pubkey on VPS only | never in git |
-| OTP domains | `markettabrak.my.id` · `markettabrak.site` (CF Email Routing → Gmail) | — | budgezen/mypapyr retired (Gmail 421) |
-| ~~Prior fleet~~ | old DO trial IPs (grok3–7 2026-07-14) | — | **Dead** 2026-07-15; rebuilt 2026-07-16 |
-| ~~CSA~~ | `168.144.137.240` | — | **Retired** 2026-07-14 |
+| OTP domains | `markettabrak.biz.id` · `markettabrak.my.id` · `markettabrak.site` (CF Email Routing → Gmail) | — | live pool (3); Pattern B multi-IMAP |
 
 **Multi-VPS rules (CAPACITY §6):** shared IMAP/domains OK; per-host `akun.db`; `GROK_EMAIL_STYLE=crypto`; mid-drain on **one** host only (grok4); never commit secrets; farmer SSH keys backed up off-VPS at `~/.ssh/grok-farmers-backup/{tag}/`.
 
@@ -329,7 +327,6 @@ Automating account creation may violate third-party ToS. Agents implement techni
 | grok4 | `104.248.157.41` | farmer 8G | **3** | **120s** |
 | grok5 | `168.144.37.202` | farmer 8G | **3** | off (`0`) |
 | grok6 | `167.71.208.99` | farmer 8G | **3** | off (`0`) |
-| ~~Prior trial / CSA~~ | old IPs | **dead / retired** | — | — |
 
 - App (all farmers): `/home/magadirxwin/grok-farm`
 - DB: per-host `/home/magadirxwin/grok-farm/akun.db` (mode 600)
