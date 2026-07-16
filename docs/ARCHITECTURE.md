@@ -1,8 +1,8 @@
 # Architecture — Grok Farm Enterprise
 
-**Version:** 2.0.0  
+**Version:** 2.3.2  
 **Status:** Production  
-**Last updated:** 2026-07-12
+**Last updated:** 2026-07-16
 
 ---
 
@@ -27,8 +27,8 @@ After inject, token alive/dead is a **9router / consumer** concern. Steady state
 └─────────────┘                    └──────▲───────┘
                                           │
 ┌─────────────┐    residential     ┌──────┴───────┐     SSH/JSONL    ┌─────────────────┐
-│ WebShare    │ ─────────────────► │  Farm VPS    │ ───────────────► │ 9router VPS     │
-│ Proxy Pools │   (non-EU IPs)     │  (CSA)       │                  │ (ninerouter)    │
+│ WebShare    │ ─────────────────► │  Farm fleet  │ ───────────────► │ 9router VPS     │
+│ Proxy Pools │   (non-EU IPs)     │  DO SGP1 ×5  │                  │ (ninerouter)    │
 └─────────────┘                    │              │ ◄── sync pools ──│ proxyPools SQLite│
                                    │ systemd      │                  │ grok-cli + xai   │
                                    │ farmer loop  │                  │ connections      │
@@ -39,12 +39,12 @@ After inject, token alive/dead is a **9router / consumer** concern. Steady state
 
 ## 2. Runtime topology
 
-| Role | Host (example) | User | Port / path |
-|------|----------------|------|-------------|
-| Farmer | CSA VPS `152.42.242.192` | `magadirxwin` (non-root) | `~/grok-farm` |
+| Role | Host (live) | User | Port / path |
+|------|-------------|------|-------------|
+| Farmer fleet | grok2–grok6 DO SGP1 (see AGENTS §3 / CAPACITY §6.2) | `magadirxwin` (non-root) | `~/grok-farm` |
 | Gateway | 9router `49.12.82.34:39999` | `root` SSH | HTTP `20128` |
-| OTP inbox | Gmail (1..N) | App password | IMAP `993` |
-| Domain pool | e.g. `budgezen.com`, `mypapyr.com` | Cloudflare Email Routing | catch-all → IMAP |
+| OTP inbox | Gmail (1..N via Pattern B) | App password | IMAP `993` |
+| Domain pool | `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` | Cloudflare Email Routing | catch-all → IMAP (Pattern B) |
 
 **Hard constraint:** Camoufox must **not** run as root (XPCOM incomplete under root cache).
 
@@ -62,7 +62,7 @@ After inject, token alive/dead is a **9router / consumer** concern. Steady state
 ### 3.1b Identity plane (`email_identity.py`)
 
 ```
-GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com
+GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site
         │
         ▼
   IdentityPool.pick_domain()  ── random | round_robin
@@ -73,7 +73,7 @@ GROK_EMAIL_DOMAINS=budgezen.com,mypapyr.com
 
 | Config | Role |
 |--------|------|
-| `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred) |
+| `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred; live: markettabrak.*) |
 | `GROK_EMAIL_DOMAIN` | Legacy single domain (merged into pool) |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `random` (default) or `round_robin` |
 | `GROK_EMAIL_LOCAL_STYLE` | `realistic` (default human names) · `crypto` (hash) · `parser` (API) |

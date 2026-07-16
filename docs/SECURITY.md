@@ -63,7 +63,7 @@ Farm VPS only needs the **public** recipient to encrypt. The **private** identit
 | ACL | remove inheritance; grant FullControl only to your user + `SYSTEM` (`icacls … /inheritance:r /grant:r "%USERNAME%:(F)" "SYSTEM:(F)"`) |
 | Decrypt | install [age](https://github.com/FiloSottile/age) for Windows, or decrypt on a Linux host that has the identity |
 
-**CSA production:** farm host may keep root-only identity at `/root/.config/grok-farm/age.identity` for ops convenience **only if** a second copy exists on the operator laptop (B) and/or password manager (A). Without a second copy, S3 restore is impossible if the VPS is lost.
+**Farm hosts:** prefer **pubkey-only** on VPS (`age.pubkey` / `AGE_RECIPIENT`). Private `age.identity` stays on the operator laptop (B) and/or password manager (A). Without an offline private copy, S3 restore is impossible if the VPS is lost.
 
 Do **not** commit `age.identity` or paste it into chat/tickets.
 

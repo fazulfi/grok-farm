@@ -16,8 +16,8 @@
 
 **Repo:** private `fazulfi/grok-farm`  
 **Code pin:** `v2.3.2`+ / `main`  
-**Live fleet (update when moved):** grok4 `157.245.49.4` · grok3 `143.198.86.242` · grok5 `206.189.37.233` · grok6 `174.138.24.143` · grok7 `157.245.199.70` · user `magadirxwin` · gateway `49.12.82.34:39999`  
-**Retired:** CSA `168.144.137.240` (2026-07-14)
+**Live fleet (2026-07-16):** grok2 `157.245.55.62` · grok3 `168.144.36.46` · grok4 `104.248.157.41` · grok5 `168.144.37.202` · grok6 `167.71.208.99` · user `magadirxwin` · concurrent **3** · gateway `49.12.82.34:39999`  
+**OTP domains:** `markettabrak.biz.id` · `markettabrak.my.id` · `markettabrak.site`
 ### Quick DR
 
 1. Open **[MIGRATION.md](./MIGRATION.md)**  

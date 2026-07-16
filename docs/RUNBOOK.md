@@ -61,7 +61,7 @@ python3 sync_proxies_from_9r.py
 
 ### R3c — Domain selected but OTP never for that domain (multi-domain)
 
-**Symptom:** farm starts `user@newdomain.com`, IMAP waits, timeout; budgezen (or known-good domain) still gets OTP.
+**Symptom:** farm starts `user@newdomain.com`, IMAP waits, timeout; known-good domain (e.g. markettabrak.my.id) still gets OTP.
 
 **Evidence probe (on farmer host, secrets not printed):**
 
@@ -107,7 +107,7 @@ PY
 ```sql
 -- re-enable after routing fixed (farmer host, akun.db)
 UPDATE domain_stats SET consecutive_fails=0, disabled=0, updated_at=datetime('now')
- WHERE domain='mypapyr.com';
+ WHERE domain='markettabrak.site';
 ```
 
 **Do not** assume Cloudflare UI “Active” means OTP inbox receives xAI mail — always verify with IMAP probe.
@@ -488,10 +488,11 @@ Full step-by-step: **docs/MIGRATION.md** + **docs/DEPLOYMENT.md**.
 
 ### Prevention
 
-- Weekly: `scp csa:.../backups/latest.tgz.age` to laptop
+- Weekly: pull `s3://grok-farm/farm-vps/grok{N}/latest.tgz.age` (or scp one host) to laptop
 - Keep Gmail App Passwords + `GROK_PASSWORD` in password manager
 - Keep `age.identity` offline (laptop ACL locked)
-- Optional: restore S3 `backup.env` for offsite age archives
+- Keep `backup.env` S3 keys in password manager (never git)
+- Farmer SSH keys: workstation `~/.ssh/grok-farmers-backup/{tag}/` (trial-safe)
 
 ---
 
