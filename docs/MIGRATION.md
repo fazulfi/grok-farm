@@ -1,8 +1,7 @@
 # Migration Playbook — VPS Death / Rebuild
 
 **Audience:** on-call / operator  
-**Last proven:** 2026-07-14 — multi-VPS DO fleet (grok3–grok7) with age/S3 per-host prefixes; CSA `168.144.137.240` **retired**  
-**Historical:** 2026-07-13 — old CSA `152.42.242.192` → `168.144.137.240` (now retired)  
+**Last proven:** 2026-07-16 — multi-VPS DO SGP1 fleet grok2–grok6 (5×8G) with age/S3 per-host prefixes  
 **RTO target:** < 45 min with age backup; < 90 min rebuild from 9router only  
 **RPO:** last successful inject to 9router (tokens live on gateway even if farm disk is gone)
 
@@ -28,19 +27,17 @@ Related: [DEPLOYMENT.md](./DEPLOYMENT.md) · [RUNBOOK.md](./RUNBOOK.md) R16 · [
 
 ## 1. Live production map (update when host changes)
 
-| Role | Current (2026-07-14) | Notes |
+| Role | Current (2026-07-16) | Notes |
 |------|----------------------|--------|
-| Farm fleet | **grok4** `157.245.49.4` · **grok3** `143.198.86.242` · **grok5** `206.189.37.233` · **grok6** `174.138.24.143` · **grok7** `157.245.199.70` | DO SGP1; 8G concurrent **3** (mid-drain grok4 only); grok6 4G light concurrent **1** |
+| Farm fleet | **grok2** `157.245.55.62` · **grok3** `168.144.36.46` · **grok4** `104.248.157.41` · **grok5** `168.144.37.202` · **grok6** `167.71.208.99` | DO SGP1; all 8G concurrent **3**; mid-drain **grok4** only; digest leader **grok3** |
 | Farm user | `magadirxwin` (non-root) | Camoufox **must not** run as root |
 | App dir | `/home/magadirxwin/grok-farm` | per host |
 | DB | `~/grok-farm/akun.db` mode **600** | **per-host** (not shared) |
 | Gateway | `49.12.82.34` SSH port **39999** | 9router Pro; API often `:20128` |
 | Proxy SoT | 9router **`proxyPools`** | Sync → `usa_proxies.txt` |
 | Backup S3 | `s3://grok-farm/farm-vps/grok{N}/…` | age encrypt; `backup.env` per host |
-| Domains | `budgezen.com` + `mypapyr.com` | Pattern B → two Gmails |
+| Domains | `markettabrak.biz.id` + `markettabrak.my.id` + `markettabrak.site` | Pattern B → three Gmails |
 | Code pin | tag **`v2.3.2`+** / `main` | Prefer release tag |
-
-Retired / do not target as production: CSA `168.144.137.240`, old `152.42.242.192` (`csa-old`).
 
 ---
 
@@ -78,8 +75,10 @@ Password manager:
 ### 2.2 What to pull off-VPS weekly
 
 ```bash
-# From workstation with SSH csa
-scp csa:/home/magadirxwin/grok-farm/backups/latest.tgz.age ./backups/
+# From workstation — pull latest age archive (S3 preferred)
+# aws s3 cp s3://grok-farm/farm-vps/grok3/latest.tgz.age ./backups/ --endpoint-url …
+# or scp one live host:
+scp magadirxwin@168.144.36.46:~/grok-farm/backups/latest.tgz.age ./backups/
 # Decrypt only when needed:
 # age -d -i ~/.config/grok-farm/age.identity -o restore.tgz latest.tgz.age
 ```
@@ -294,7 +293,7 @@ Create `~/grok-farm/.env` from `.env.example` with **real** values:
 | Key | Purpose |
 |-----|---------|
 | `GROK_IMAP_USER` / `GROK_IMAP_PASS` | Primary Gmail App Password |
-| `GROK_EMAIL_DOMAINS` | e.g. `budgezen.com,mypapyr.com` |
+| `GROK_EMAIL_DOMAINS` | e.g. `markettabrak.biz.id,markettabrak.my.id,markettabrak.site` |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `round_robin` recommended |
 | `GROK_PASSWORD` | **Quoted** farm password for xAI signup |
 | `GROK_HEADLESS=true` | VPS |
@@ -308,21 +307,30 @@ Pattern B multi-Gmail — `identities.json` (chmod 600, **never git**):
 {
   "identities": [
     {
-      "id": "primary",
-      "imap_user": "primary@gmail.com",
+      "id": "biz_id",
+      "imap_user": "gmail_a@gmail.com",
       "imap_pass": "xxxx xxxx xxxx xxxx",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["budgezen.com"],
+      "domains": ["markettabrak.biz.id"],
       "enabled": true
     },
     {
-      "id": "secondary",
-      "imap_user": "secondary@gmail.com",
+      "id": "my_id",
+      "imap_user": "gmail_b@gmail.com",
       "imap_pass": "yyyy yyyy yyyy yyyy",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["mypapyr.com"],
+      "domains": ["markettabrak.my.id"],
+      "enabled": true
+    },
+    {
+      "id": "site",
+      "imap_user": "gmail_c@gmail.com",
+      "imap_pass": "zzzz zzzz zzzz zzzz",
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993,
+      "domains": ["markettabrak.site"],
       "enabled": true
     }
   ]
@@ -490,14 +498,28 @@ If OTP fails after restore: RUNBOOK **R3 / R3c** (probe IMAP To: headers).
 ## 11. Workstation SSH config template
 
 ```sshconfig
-Host csa
-  HostName 168.144.137.240
-  User root
+Host grok2
+  HostName 157.245.55.62
+  User magadirxwin
   IdentityFile ~/.ssh/id_ed25519
-  # farmer ops: ssh csa then sudo -u magadirxwin -i
 
-Host csa-farmer
-  HostName 168.144.137.240
+Host grok3
+  HostName 168.144.36.46
+  User magadirxwin
+  IdentityFile ~/.ssh/id_ed25519
+
+Host grok4
+  HostName 104.248.157.41
+  User magadirxwin
+  IdentityFile ~/.ssh/id_ed25519
+
+Host grok5
+  HostName 168.144.37.202
+  User magadirxwin
+  IdentityFile ~/.ssh/id_ed25519
+
+Host grok6
+  HostName 167.71.208.99
   User magadirxwin
   IdentityFile ~/.ssh/id_ed25519
 
@@ -506,11 +528,6 @@ Host ninerouter
   Port 39999
   User root
   IdentityFile ~/.ssh/id_ed25519
-
-Host csa-old
-  HostName 152.42.242.192
-  User root
-  # suspended — do not use
 ```
 
 ---
