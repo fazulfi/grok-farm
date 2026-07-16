@@ -312,17 +312,17 @@ git clone --branch v2.2.0 https://github.com/fazulfi/grok-farm.git
 git fetch --tags && git checkout main   # or newer tag when released
 ```
 
-**Host reference (2026-07-14):**
+**Host reference (2026-07-16 rebuild):**
 
 | Host | IP | User | Notes |
 |------|-----|------|-------|
-| grok4 | `157.245.49.4` | `magadirxwin` | 8G · concurrent **3** · mid-drain 120s · S3 `farm-vps/grok4` |
-| grok3 | `143.198.86.242` | `magadirxwin` | 8G · concurrent **3** · fleet digest leader · S3 `farm-vps/grok3` |
-| grok5 | `206.189.37.233` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok5` |
-| grok6 | `174.138.24.143` | `magadirxwin` | **4G light** · concurrent 1 · S3 `farm-vps/grok6` |
-| grok7 | `157.245.199.70` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok7` |
+| grok2 | `157.245.55.62` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok2` |
+| grok3 | `168.144.36.46` | `magadirxwin` | 8G · concurrent **3** · fleet digest leader · S3 `farm-vps/grok3` |
+| grok4 | `104.248.157.41` | `magadirxwin` | 8G · concurrent **3** · mid-drain 120s · S3 `farm-vps/grok4` |
+| grok5 | `168.144.37.202` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok5` |
+| grok6 | `167.71.208.99` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok6` |
 | Gateway | `49.12.82.34:39999` | root (SSH) | proxyPools + inject |
-| ~~CSA~~ | `168.144.137.240` | — | **retired** 2026-07-14 |
+| ~~CSA / prior trial~~ | old IPs | — | retired / dead 2026-07-15 |
 
 Multi-VPS sizing + mid-drain rules: [CAPACITY.md](./CAPACITY.md) §6.2. Agent host map: `AGENTS.md` §3 / §9.
 

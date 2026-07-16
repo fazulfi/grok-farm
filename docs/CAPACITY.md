@@ -99,17 +99,19 @@ VPS-F3 ──┘
 
 Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 
-### 6.2 Live multi-VPS inventory (2026-07-14)
+### 6.2 Live multi-VPS inventory (2026-07-16 rebuild)
 
 | Tag | IP | Spec | Concurrent | Mid-drain | Notes |
 |-----|-----|------|------------|-----------|-------|
-| grok4 | `157.245.49.4` | 4 vCPU / 8G / 240G | **3** | **120s** | only host with mid-drain |
-| grok3 | `143.198.86.242` | 4 vCPU / 8G / 240G | **3** | off | staggered inject; fleet digest leader |
-| grok5 | `206.189.37.233` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
-| grok6 | `174.138.24.143` | **2 vCPU / 4G / 120G** + 8G swap | **1** | off | light farmer only (not full 8G parity) |
-| grok7 | `157.245.199.70` | 4 vCPU / 8G / 240G | **3** | off | staggered inject |
-| grok2 | `157.245.149.116` | 4G | — | — | optional light; not required |
+| grok2 | `157.245.55.62` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| grok3 | `168.144.36.46` | 4 vCPU / 8G / 160G | **3** | off | fleet digest **leader** |
+| grok4 | `104.248.157.41` | 4 vCPU / 8G / 160G | **3** | **120s** | only host with mid-drain |
+| grok5 | `168.144.37.202` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| grok6 | `167.71.208.99` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| ~~Prior trial fleet~~ | old IPs (2026-07-14) | — | — | — | **dead** 2026-07-15; replaced |
 | ~~CSA~~ | `168.144.137.240` | — | — | — | **retired** 2026-07-14 |
+
+OTP domains: `markettabrak.my.id` + `markettabrak.site` (CF → Gmail). budgezen/mypapyr retired (421).
 
 **Must on every farmer host:**
 

@@ -20,16 +20,16 @@
 | `grok-farm-mark-expired.timer` | Each farm VPS | systemd timer | Every **30 min**: mark **farmed-only** expired JWTs as `error` (no `--include-injected`) |
 | `grok-farm-digest.timer` | Each farm VPS | systemd timer | Daily **~01:00 UTC** (+ ≤5m random): `daily_digest.py` → **one fleet Telegram** (S3 snapshots + leader) or `--local` per-host; inventory only |
 
-### Fleet hosts (2026-07-14)
+### Fleet hosts (2026-07-16 rebuild)
 
 | Tag | IP | Concurrent | Mid-drain | Notes |
 |-----|-----|------------|-----------|-------|
-| grok4 | `157.245.49.4` | **3** | 120s | mid-drain host (8G); S3 prefix `farm-vps/grok4` |
-| grok3 | `143.198.86.242` | **3** | off | post-batch inject (8G); fleet digest **leader**; `farm-vps/grok3` |
-| grok5 | `206.189.37.233` | **3** | off | post-batch inject (8G); `farm-vps/grok5` |
-| grok6 | `174.138.24.143` | **1** | off | **4G light** farmer; `farm-vps/grok6` |
-| grok7 | `157.245.199.70` | **3** | off | post-batch inject (8G); `farm-vps/grok7` |
-| ~~CSA~~ | `168.144.137.240` | — | — | **retired** 2026-07-14 |
+| grok2 | `157.245.55.62` | **3** | off | S3 `farm-vps/grok2` |
+| grok3 | `168.144.36.46` | **3** | off | fleet digest **leader**; `farm-vps/grok3` |
+| grok4 | `104.248.157.41` | **3** | 120s | mid-drain host; `farm-vps/grok4` |
+| grok5 | `168.144.37.202` | **3** | off | `farm-vps/grok5` |
+| grok6 | `167.71.208.99` | **3** | off | `farm-vps/grok6` |
+| ~~CSA / prior trial~~ | old IPs | — | — | retired / dead |
 
 User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 

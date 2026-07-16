@@ -4,6 +4,15 @@ All notable changes to Grok Farm are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Fleet rebuild (2026-07-16):** prior DO trial hosts dead → new 5×8G SGP1
+  fleet: `grok2` `157.245.55.62`, `grok3` `168.144.36.46`, `grok4`
+  `104.248.157.41`, `grok5` `168.144.37.202`, `grok6` `167.71.208.99`
+  (all concurrent **3**; mid-drain only grok4; digest leader grok3). OTP
+  domains `markettabrak.my.id` + `markettabrak.site`. Inventory docs
+  AGENTS/CAPACITY/OPERATIONS/DEPLOYMENT updated.
+
 ### Added
 
 - **Proxy re-enable CLI:** `reenable_proxy.py` (`--list` / `--match` / `--all` /
