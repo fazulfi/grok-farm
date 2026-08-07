@@ -2,6 +2,21 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.7.0-auto-inject] — 2026-08-07
+
+### Added
+- **`docs/WORKFLOW-AUTO-INJECT-PER-AKUN.md`** — workflow inject per akun (atomic, VERIFIED):
+  - Farm → OAuth token (di browser sama) → inject 9router (exchange JWT) → assign proxy pool match IP farm.
+  - 1 proses, ~84 detik/akun. Keputusan: **per-akun > batch** (proxy stabil, token fresh, failure isolated).
+- **`farm_v2.py`** — hook `V2_AUTO_INJECT` + `inject_to_9router()` (exchange + proxy pool matching):
+  - `V2_AUTO_INJECT=1`, `V2_R9_BASE`, `V2_R9_TOKEN` di .env.
+  - Log: `[oauth] TOKEN diperoleh ... [inject] OK -> conn <id> pool <pool-id>`.
+- `run_farm100.sh` — launch farm 100 akun (sequential, log /tmp/farm100.log).
+
+### Verified
+- 1 akun test: `u3un21sf6yfe@gogoligo.web.id` → token ✓ → injected ✓ → conn `f0dad024-...` pool `90d34908-...` (84.0s).
+- Farm 100 akun running (2026-08-07 12:52 UTC).
+
 ## [v2.6.0-inject] — 2026-08-07
 
 ### Added
