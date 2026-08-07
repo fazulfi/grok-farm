@@ -58,7 +58,18 @@ SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 XAI_DEVICE_CODE = "https://auth.x.ai/oauth2/device/code"
 XAI_TOKEN = "https://auth.x.ai/oauth2/token"
-XAI_SCOPE = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write"
+# Intel 2026-08-07 (grup farmer): scope + referrer memengaruhi health token.
+# Akun "thinking jalan" umumnya punya scope `... conversations:read conversations:write`
+# (cocokkan ke grok-build latest — scope baru muncul) + referrer. Bisa di-override via env.
+XAI_SCOPE = _env(
+    "V2_OAUTH_SCOPE",
+    "openid profile email offline_access grok-cli:access api:access "
+    "conversations:read conversations:write",
+)
+# Nilai `referrer` pada auth request. Grok-build login pakai "grok-build".
+XAI_REFERRER = _env("V2_OAUTH_REFERRER", "grok-build")
+# Header version (mencocokkan grok CLI / build terbaru — sesuaikan kalau xAI rilis baru)
+XAI_CLIENT_VERSION = _env("V2_CLIENT_VERSION", "0.1.0")
 
 _domain_idx = 0
 
@@ -118,8 +129,12 @@ def xai_device_code() -> dict:
         data={
             "client_id": XAI_CLIENT_ID,
             "scope": XAI_SCOPE,
+            "referrer": XAI_REFERRER,
         },
-        headers={"User-Agent": "GrokFarm/v2 (device)"},
+        headers={
+            "User-Agent": f"grok-build/{XAI_CLIENT_VERSION} (GrokFarm/v2 device)",
+            "x-grok-client-version": XAI_CLIENT_VERSION,
+        },
         timeout=20,
     )
     r.raise_for_status()
@@ -136,7 +151,10 @@ def xai_poll_token(device_code: str, interval: int = 5, timeout: float = 180) ->
                 "device_code": device_code,
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             },
-            headers={"User-Agent": "GrokFarm/v2 (device)"},
+            headers={
+                "User-Agent": f"grok-build/{XAI_CLIENT_VERSION} (GrokFarm/v2 device)",
+                "x-grok-client-version": XAI_CLIENT_VERSION,
+            },
             timeout=20,
         )
         data = r.json()
