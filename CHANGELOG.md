@@ -2,6 +2,23 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.6.0-inject] — 2026-08-07
+
+### Added
+- **`docs/METHOD-INJECT-2026-08-07.md`** — metode inject akun farm ke 9Router (grok-cli)
+  **tanpa browser, DENGAN proxy** — VERIFIED:
+  - `POST /api/oauth/grok-cli/exchange {"code":"<JWT>"}` → connection dibuat langsung (authType access_token).
+  - `PUT /api/providers/<id> {"proxyPoolId":...}` → assign proxy pool WAJIB (anti-plenger, egress non-EU).
+  - Call `gcli/grok-4.5` via 9Router → **reasoning sukses (255 km)** — akun FREE, tanpa subscription.
+- **`inject_grok_cli_9router.py`** v2 — rewrite bersih: direct-JWT exchange + proxy pool assignment
+  otomatis (per-akun / rotate). Input v2_sso.txt (JSONL) atau accounts.txt.
+- Proxy pools WebShare (`Imported <ip>:<port>`) sudah di-import di 9router (191 pool).
+
+### Verified
+- `R9_TOKEN=... python3 inject_grok_cli_9router.py --input v2_sso.txt`
+  → `[1] OK af71o796cxxk@gogoligo.biz.id -> conn ... ; proxy -> Imported 46.202.227.181:8188 ; DONE: ok=1 fail=0`
+- 3 connection grok-cli active (1 manual + 2 inject), call grok-4.5 OK.
+
 ## [v2.5.0-verified] — 2026-08-07
 
 ### Added
