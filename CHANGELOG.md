@@ -2,6 +2,21 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.8.0-production] — 2026-08-07
+
+### Added — PRODUCTION HARDENING
+- **Vision Turnstile solver** (`_solve_turnstile`): checkbox click → screenshot → gpt-4o via 9router → koordinat klik → solve interactive puzzle. (Checkbox doang gagal di proxy di-flag.)
+- **Context PER AKUN** (proxy rotate benar): satu context utk semua akun = semua pakai proxy #1 = xAI flag.
+- **OTP strict match**: `To:` persis target (bukan match subject doang — bug baca OTP email akun lain).
+- **Burn + retry**: proxy gagal (Turnstile/givenName/OTP) → skip (BURNED_PROXIES) + retry 3 attempt.
+- **Supervised launcher**: `run_farm100_supervised.sh` — auto-restart on crash, resume-safe.
+- `docs/PRODUCTION-HARDENING-v2.8.md` — dokumentasi lengkap.
+- Vision call via **curl + browser UA** (urllib kena CF 1010).
+
+### Verified
+- Test 3 akun: **3/3 OK** (100%), proxy beda per akun, inject+pool OK.
+- Farm 100 supervised: **16/17 OK = 94%** (1 burn → retry sukses).
+
 ## [v2.7.0-auto-inject] — 2026-08-07
 
 ### Added
