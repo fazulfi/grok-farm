@@ -2,6 +2,22 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.5.0-verified] — 2026-08-07
+
+### Added
+- **`docs/METHOD-2026-08-07.md`** — metode resmi yang **TERBUKTI** (production-tested 1 akun
+  sukses end-to-end: `e0sk2n2atc7u@gogoligo.my.id` → grok.com, 71.9s). Dokumentasi lengkap:
+  - Playwright `channel='chrome'` + headed/xvfb + WebShare proxy **split-creds** (bukan URL-embedded — ERR_INVALID_AUTH_CREDENTIALS).
+  - CF Email Routing catch-all → Gmail (domain gogoligo.*, 1 Gmail shared).
+  - **OTP IMAP via proxy CONNECT tunnel** (idcloudhost SG blokir 993 langsung).
+  - **OTP input keyboard typing** (6 kotak React, `.fill()` gagal).
+  - **Turnstile solve via iframe `challenges.cloudflare.com`** (checkbox cookie banner ≠ Turnstile).
+  - `since_ts` filter OTP fresh (hindari re-used/invalid).
+- `farm_v2.py` v2.5: semua fix di atas (proxy split-creds, IMAP via CONNECT, keyboard OTP, turnstile iframe).
+
+### Verified
+- `python3 farm_v2.py 1` → `[1] OK e0sk2n2atc7u@gogoligo.my.id (71.9s)`, URL grok.com, 28 SSO cookies.
+
 ## [v2.4.0-audit] — 2026-08-07
 
 ### Added
