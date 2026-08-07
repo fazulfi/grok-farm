@@ -60,6 +60,14 @@ AUTO_INJECT = _env("V2_AUTO_INJECT", "0").lower() in ("1", "true", "yes")
 R9_BASE = _env("V2_R9_BASE", "http://127.0.0.1:20228")
 R9_TOKEN = _env("V2_R9_TOKEN", "")
 
+# ── VISION CAPTCHA (interactive Turnstile solver) via 9router vision model ─────
+# farm.py lama pakai ini utk lolos Turnstile image-puzzle yang gak bisa auto-click.
+CAPTCHA_MODEL = _env("GROK_CAPTCHA_MODEL", "openrouter/openai/gpt-4o")
+# API key 9router utk call vision (dari apiKeys table, e.g. hiyuki)
+CAPTCHA_API_KEY = _env("GROK_CAPTCHA_API_KEY", "")
+# Base API 9router (domain — pakai curl+UA utk hindari CF 1010)
+CAPTCHA_API_URL = _env("GROK_CAPTCHA_API_URL", "https://router.markettabrak.biz.id/v1/chat/completions")
+
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 XAI_DEVICE_CODE = "https://auth.x.ai/oauth2/device/code"
@@ -212,10 +220,12 @@ def read_otp_from_imap(target_email: str, timeout: float = 120, proxy_url: str |
                         body = msg.get_payload(decode=True).decode("utf-8", "replace")
                     except Exception:
                         body = str(msg.get_payload() or "")
-                # match recipient alias (catch-all): target di To/Delivered-To ATAU local-part di body
+                # match recipient alias (catch-all): WAJIB target di To/Delivered-To ATAU
+                # local-part di body. JANGAN match hanya karena subject confirmation code
+                # (line longgar ini bikin baca OTP email akun LAIN → invalid).
                 header_hit = (target_lower in to_all) or (len(target_local) >= 8 and target_local in to_all)
                 body_hit = target_lower in body.lower() or (len(target_local) >= 8 and target_local in body.lower())
-                if header_hit or body_hit or "confirmation code" in subj.lower():
+                if header_hit or body_hit:
                     for txt in (subj, body):
                         g = re.search(r"([A-Z0-9]{3}-[A-Z0-9]{3})", txt)
                         if g:
@@ -382,17 +392,23 @@ def load_proxy_pool(path: str | None = None) -> list[str]:
 
 _proxy_idx = 0
 CURRENT_PROXY: str | None = None  # proxy yang sedang dipakai run ini (untuk IMAP OTP)
+BURNED_PROXIES: set = set()  # proxy yg gagal (Turnstile/givenName) — skip di putaran berikutnya
 
-def next_proxy() -> str | None:
-    """Round-robin ambil proxy berikutnya dari pool."""
+def next_proxy(skip_burned: bool = True) -> str | None:
+    """Round-robin ambil proxy berikutnya dari pool, skip yg sudah burned."""
     global _proxy_idx, CURRENT_PROXY
     if not PROXY_POOL:
         CURRENT_PROXY = PROXY or None
         return CURRENT_PROXY
-    px = PROXY_POOL[_proxy_idx % len(PROXY_POOL)]
-    _proxy_idx += 1
-    CURRENT_PROXY = px
-    return px
+    for _ in range(len(PROXY_POOL) * 2):
+        px = PROXY_POOL[_proxy_idx % len(PROXY_POOL)]
+        _proxy_idx += 1
+        if skip_burned and px in BURNED_PROXIES:
+            continue
+        CURRENT_PROXY = px
+        return px
+    CURRENT_PROXY = None
+    return None
 
 
 def _launch_ctx(p, load_extension: bool = True):
@@ -424,6 +440,7 @@ def _launch_ctx(p, load_extension: bool = True):
             "username": _proxy_user(px),
             "password": _proxy_pass(px),
         }
+    print(f"[ctx] proxy: {_proxy_ip(px) if px else 'NONE'}", flush=True)
     return p.chromium.launch_persistent_context(**kwargs)
 
 
@@ -470,6 +487,175 @@ def _setup_ctx(ctx, chrome_v: str):
 
 # ── Signup flow (Audit §4 + dzDev37 flow) ─────────────────────────────────────
 _RUN_START_TS = time.time()  # set saat import; dipakai read_otp utk skip OTP lama
+
+# ── Vision CAPTCHA solver (interactive Turnstile) ─────────────────────────────
+_VISION_TURNSTILE_PROMPT = """You are looking at a full-page browser screenshot that may show a Cloudflare
+Turnstile interactive challenge (image selection puzzle, not a simple checkbox).
+
+If you see a visual challenge (select all images with X, click objects, crosswalks, etc.):
+1. Identify the tiles/objects to click
+2. Return click coordinates as percentages of the FULL PAGE screenshot:
+   CLICK: x1%,y1% | x2%,y2% | ...
+   where x and y are 0-100 relative to full image.
+
+If only a simple "Verify you are human" checkbox visible:
+  return exactly: CHECKBOX
+
+If no captcha/challenge is visible:
+  return exactly: NO_CAPTCHA
+
+Do not invent coordinates for form fields."""
+
+
+def _call_vision_model(image_b64: str, prompt: str, timeout: int = 60) -> str | None:
+    """Call vision model via 9router (curl + browser UA utk hindari CF 1010)."""
+    import base64
+    if not CAPTCHA_API_KEY:
+        print("[captcha] no CAPTCHA_API_KEY", flush=True)
+        return None
+    import random
+    payload = {
+        "model": CAPTCHA_MODEL,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+        ]}],
+        "max_tokens": 300,
+        "temperature": 0,
+    }
+    pf = f"/tmp/captcha_req_{int(time.time())}_{random.randrange(9999)}.json"
+    try:
+        with open(pf, "w") as f:
+            json.dump(payload, f)
+        cmd = [
+            "curl", "-s", "--max-time", str(timeout),
+            CAPTCHA_API_URL,
+            "-H", f"Authorization: Bearer {CAPTCHA_API_KEY}",
+            "-H", "Content-Type: application/json",
+            "-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/148.0 Safari/537.36",
+            "--data", f"@{pf}",
+        ]
+        import subprocess
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        out = r.stdout or ""
+        try:
+            d = json.loads(out)
+            return d.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception:
+            return out
+    except Exception as e:
+        print(f"[captcha] vision err: {e}", flush=True)
+        return None
+    finally:
+        try:
+            os.remove(pf)
+        except Exception:
+            pass
+
+
+def _parse_vision_clicks(text: str) -> list:
+    if not text:
+        return []
+    upper = text.strip().upper()
+    if "NO_CAPTCHA" in upper or "CHECKBOX" in upper:
+        return []
+    clicks = []
+    for m in re.finditer(r"(\d{1,3}(?:\.\d+)?)\s*%\s*[, ]\s*(\d{1,3}(?:\.\d+)?)\s*%", text):
+        x, y = float(m.group(1)), float(m.group(2))
+        if 0 <= x <= 100 and 0 <= y <= 100:
+            clicks.append((x, y))
+    return clicks
+
+
+def _solve_turnstile(page, max_wait: int = 60) -> bool:
+    """Solve Turnstile: klik checkbox, lalu vision utk interactive puzzle."""
+    import time as _t
+    import base64 as _b64
+    if not CAPTCHA_API_KEY:
+        # tanpa vision — hanya klik checkbox (retry terbatas)
+        return _try_click_turnstile(page, attempts=5)
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        # cek token sudah ada
+        try:
+            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+        except Exception:
+            tok = ""
+        if tok:
+            return True
+        # 1) klik checkbox di iframe cloudflare
+        clicked = _try_click_turnstile(page, attempts=2)
+        _t.sleep(2.0)
+        try:
+            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+        except Exception:
+            tok = ""
+        if tok:
+            return True
+        # 2) vision utk interactive challenge
+        if not clicked:
+            try:
+                img = page.screenshot(full_page=False)
+                b64 = _b64.b64encode(img).decode()
+                resp = _call_vision_model(b64, _VISION_TURNSTILE_PROMPT)
+                if resp:
+                    up = resp.strip().upper()
+                    print(f"[captcha] vision: {resp[:120]}", flush=True)
+                    if "NO_CAPTCHA" in up:
+                        # cek token — kalau sudah ada, done
+                        try:
+                            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+                        except Exception:
+                            tok = ""
+                        if tok:
+                            return True
+                    if "CHECKBOX" in up:
+                        _try_click_turnstile(page, attempts=2)
+                        _t.sleep(2.0)
+                        continue
+                    coords = _parse_vision_clicks(resp)
+                    if coords:
+                        try:
+                            size = page.evaluate("() => ({w: Math.max(document.documentElement.scrollWidth, window.innerWidth), h: Math.max(document.documentElement.scrollHeight, window.innerHeight)})")
+                        except Exception:
+                            size = {"w": 1280, "h": 1024}
+                        w, h = size["w"], size["h"]
+                        for px, py in coords:
+                            try:
+                                page.mouse.click((px / 100.0) * w, (py / 100.0) * h)
+                            except Exception:
+                                pass
+                            _t.sleep(0.4)
+                        _t.sleep(2.0)
+                        continue
+            except Exception as e:
+                print(f"[captcha] vision fail: {e}", flush=True)
+        _t.sleep(1.2)
+    return False
+
+
+def _try_click_turnstile(page, attempts: int = 3) -> bool:
+    """Klik checkbox Turnstile di iframe challenges.cloudflare.com."""
+    import time as _t
+    for _ in range(attempts):
+        for fr in page.frames:
+            if "challenges.cloudflare.com" in (fr.url or "") or "turnstile" in (fr.url or ""):
+                try:
+                    cb = fr.locator('input[type="checkbox"]')
+                    if cb.count():
+                        cb.first.click(timeout=3000)
+                        return True
+                except Exception:
+                    pass
+                try:
+                    fr.locator("body").click(position={"x": 20, "y": 20}, timeout=2000)
+                    return True
+                except Exception:
+                    pass
+                break
+        _t.sleep(1.0)
+    return False
+
 
 def _signup_one(ctx, chrome_v: str) -> dict:
     page = ctx.new_page()
@@ -614,7 +800,7 @@ def _signup_one(ctx, chrome_v: str) -> dict:
         page.locator("input[name=givenName]").fill(given)
         page.locator("input[name=familyName]").fill(family)
         page.locator("input[name=password]").fill(PASSWORD)
-        # 5 turnstile — click checkbox di IFRAME cloudflare (bukan checkbox cookie banner!)
+        # 5 turnstile — click checkbox + VISION solver utk interactive puzzle
         import time as _t2
         # dismiss cookie banner dulu (OneTrust) — checkbox-nya ngaco dengan Turnstile
         try:
@@ -626,43 +812,11 @@ def _signup_one(ctx, chrome_v: str) -> dict:
                 pass
         _t2.sleep(0.5)
         tok = ""
-        for _attempt in range(5):
-            # klik checkbox Turnstile di iframe challenges.cloudflare.com
-            clicked = False
-            for fr in page.frames:
-                fname = (fr.url or "")
-                if "challenges.cloudflare.com" in fname or "turnstile" in fname:
-                    try:
-                        cb = fr.locator('input[type="checkbox"]')
-                        if cb.count():
-                            cb.first.click(timeout=3000)
-                            print(f"[turnstile] clicked checkbox in frame {fname[:60]}", flush=True)
-                            clicked = True
-                    except Exception as e:
-                        print(f"[turnstile] frame click warn: {str(e)[:80]}", flush=True)
-                    break
-            if not clicked:
-                # fallback: klik label di iframe (Turnstile checkbox bisa jadi div)
-                for fr in page.frames:
-                    if "challenges.cloudflare.com" in (fr.url or ""):
-                        try:
-                            fr.locator("body").click(position={"x": 20, "y": 20}, timeout=2000)
-                            print("[turnstile] clicked iframe body (fallback)", flush=True)
-                        except Exception:
-                            pass
-            # baca token (refresh)
-            for _w in range(12):
-                try:
-                    tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
-                except Exception:
-                    tok = ""
-                if tok:
-                    break
-                _t2.sleep(1)
-            if tok:
-                break
-            print(f"[turnstile] attempt {_attempt+1}: token kosong, retry...", flush=True)
-            _t2.sleep(2)
+        solved = _solve_turnstile(page, max_wait=60)
+        try:
+            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+        except Exception:
+            tok = ""
         if not tok:
             page.screenshot(path="screenshot_turnstile_fail.png")
             raise RuntimeError("Turnstile timeout (checkbox tidak bisa di-solve otomatis)")
@@ -1012,23 +1166,43 @@ def main() -> int:
     else:
         print("[farm] WARN: tanpa proxy — langsung dari IP VPS (risiko flag tinggi)")
     with sync_playwright() as p:
-        ctx = _launch_ctx(p, load_extension=True)
-        _setup_ctx(ctx, chrome_v)
         for i in range(args.count):
             t0 = time.time()
-            try:
-                res = _signup_one(ctx, chrome_v)
-                results.append(res)
-                with OUT.open("a") as f:
-                    f.write(json.dumps(res) + "\n")
-                print(f"[{i+1}] OK {res['email']} ({time.time()-t0:.1f}s)")
-            except Exception as e:
-                print(f"[{i+1}] FAIL {e} ({time.time()-t0:.1f}s)")
-            try:
-                ctx.clear_cookies()
-            except Exception:
-                pass
-        ctx.close()
+            # ── KRITIS: context PER AKUN (proxy rotate per akun!) ──
+            # Satu context untuk semua akun = semua pakai proxy pertama =
+            # xAI flag setelah akun ke-1/2. Context baru + close per akun.
+            ok = False
+            attempts = 0
+            while attempts < 3 and not ok:
+                attempts += 1
+                px_now = CURRENT_PROXY  # proxy yang dipakai attempt ini
+                ctx = _launch_ctx(p, load_extension=True)
+                _setup_ctx(ctx, chrome_v)
+                try:
+                    res = _signup_one(ctx, chrome_v)
+                    results.append(res)
+                    with OUT.open("a") as f:
+                        f.write(json.dumps(res) + "\n")
+                    print(f"[{i+1}] OK {res['email']} ({time.time()-t0:.1f}s, attempt {attempts})")
+                    ok = True
+                except Exception as e:
+                    emsg = str(e)
+                    print(f"[{i+1}] FAIL attempt {attempts}: {emsg} ({time.time()-t0:.1f}s)")
+                    # burn proxy jika gagal karena Turnstile / givenName / OTP — kemungkinan IP di-flag
+                    if ("Turnstile" in emsg or "givenName" in emsg or "OTP" in emsg or "invalid" in emsg.lower()) and px_now:
+                        BURNED_PROXIES.add(px_now)
+                        print(f"[{i+1}] burn proxy {_proxy_ip(px_now)} (burned={len(BURNED_PROXIES)})")
+                    # email mungkin sudah dipakai di attempt 1 — generate ulang di retry
+                    time.sleep(3)
+                finally:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+            if not ok:
+                print(f"[{i+1}] GAGAL SETELAH {attempts} ATTEMPT — skip akun")
+            # pause antar akun (rate-limit friendly)
+            time.sleep(2)
     if results and args.router:
         with sync_playwright() as p:
             ctx = _launch_ctx(p, load_extension=False)
