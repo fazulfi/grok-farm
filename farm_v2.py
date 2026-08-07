@@ -55,6 +55,11 @@ PROXY = _env("V2_PROXY", "")  # optional single proxy server OR file path (proxi
 PROXY_FILE = _env("V2_PROXY_FILE", "")
 OUT = Path(_env("V2_OUT", str(_ROOT / "v2_sso.txt")))
 
+# ── AUTO-INJECT per akun ke 9Router (V2_AUTO_INJECT=1) ─────────────────────────
+AUTO_INJECT = _env("V2_AUTO_INJECT", "0").lower() in ("1", "true", "yes")
+R9_BASE = _env("V2_R9_BASE", "http://127.0.0.1:20228")
+R9_TOKEN = _env("V2_R9_TOKEN", "")
+
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 XAI_DEVICE_CODE = "https://auth.x.ai/oauth2/device/code"
@@ -687,12 +692,218 @@ def _signup_one(ctx, chrome_v: str) -> dict:
             "final_url": page.url,
             "timestamp": int(time.time()),
         }
+        # ── KRITIS: ambil OAuth token SEKARANG (masih proxy + session login) ──
+        # Setelah farm, IP proxy berubah / CF block → momen inilah satu-satunya
+        # window utk dapat access_token sebelum inject ke 9Router.
+        try:
+            oauth = _obtain_oauth_token(page)
+            if oauth:
+                data["access_token"] = oauth.get("access_token")
+                data["refresh_token"] = oauth.get("refresh_token")
+                data["token_expires_in"] = oauth.get("expires_in")
+                print(f"[oauth] TOKEN diperoleh utk {addr} (expires_in={oauth.get('expires_in')})", flush=True)
+                # ── AUTO-INJECT per akun (V2_AUTO_INJECT=1) ──
+                if AUTO_INJECT:
+                    try:
+                        inj = inject_to_9router(data["access_token"], addr, CURRENT_PROXY)
+                        if inj.get("ok"):
+                            print(f"[inject] OK -> conn {inj.get('conn_id')} pool {inj.get('pool_id','')}", flush=True)
+                            data["injected"] = True
+                            data["conn_id"] = inj.get("conn_id")
+                            data["pool_id"] = inj.get("pool_id")
+                        else:
+                            print(f"[inject] FAIL: {inj.get('error')}", flush=True)
+                            data["injected"] = False
+                            data["inject_error"] = str(inj.get("error"))[:200]
+                    except Exception as e:
+                        print(f"[inject] warn: {e}", flush=True)
+                        data["injected"] = False
+                        data["inject_error"] = str(e)[:200]
+            else:
+                print(f"[oauth] token tidak diperoleh utk {addr}", flush=True)
+        except Exception as e:
+            print(f"[oauth] warn: {e}", flush=True)
+            try:
+                data["oauth_error"] = str(e)[:200]
+            except Exception:
+                pass
         return data
     finally:
         page.close()
 
 
 # ── Router add (device-code consent automation) ────────────────────────────────
+def _proxy_ip(proxy_url: str | None) -> str:
+    if not proxy_url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(proxy_url).hostname or ""
+    except Exception:
+        return ""
+
+
+def _r9_req(method: str, path: str, body=None):
+    import urllib.request
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{R9_BASE}{path}", data=data, method=method)
+    req.add_header("x-9r-cli-token", R9_TOKEN)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/148.0 Safari/537.36")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode())
+        except Exception:
+            return e.code, {"error": e.reason}
+    except Exception as e:
+        return -1, {"error": str(e)}
+
+
+def _find_pool_for_ip(pools, proxy_ip: str):
+    if not proxy_ip or not pools:
+        return None
+    for p in pools:
+        data = p.get("data") or p
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                continue
+        if isinstance(data, dict):
+            name = data.get("name", "")
+            pool_url = data.get("proxyUrl", "")
+            if name.startswith("Imported") and proxy_ip in name:
+                return p["id"]
+            if proxy_ip in pool_url:
+                return p["id"]
+    return None
+
+
+def inject_to_9router(access_token: str, email: str, proxy_url: str | None = None) -> dict:
+    """Inject 1 akun ke 9Router (grok-cli) + assign proxy pool match IP farm."""
+    import json as _json
+    if not R9_TOKEN:
+        return {"ok": False, "error": "R9_TOKEN kosong"}
+    st, res = _r9_req("POST", "/api/oauth/grok-cli/exchange", {"code": access_token})
+    if st != 200 or not res.get("success"):
+        return {"ok": False, "error": res}
+    conn = res.get("connection", {})
+    conn_id = conn.get("id")
+    out = {"ok": True, "conn_id": conn_id, "provider": conn.get("provider")}
+
+    proxy_ip = _proxy_ip(proxy_url)
+    try:
+        spools, pools = _r9_req("GET", "/api/proxy-pools")
+        pool_id = None
+        if spools == 200:
+            raw = pools.get("proxyPools") or pools.get("pools") or pools.get("data") or []
+            pool_id = _find_pool_for_ip(raw, proxy_ip) if proxy_ip else None
+        if pool_id:
+            _r9_req("PUT", f"/api/providers/{conn_id}", {"proxyPoolId": pool_id})
+            out["pool_id"] = pool_id
+        else:
+            if spools == 200:
+                raw = pools.get("proxyPools") or pools.get("data") or []
+                for p0 in raw:
+                    d0 = p0.get("data") or p0
+                    if isinstance(d0, str):
+                        try:
+                            d0 = _json.loads(d0)
+                        except Exception:
+                            d0 = {}
+                    if isinstance(d0, dict) and d0.get("name", "").startswith("Imported"):
+                        _r9_req("PUT", f"/api/providers/{conn_id}", {"proxyPoolId": p0["id"]})
+                        out["pool_id"] = p0["id"]
+                        break
+    except Exception as e:
+        out["pool_warn"] = str(e)[:120]
+    return out
+
+
+def _obtain_oauth_token(page) -> dict | None:
+    """Ambil OAuth access token via device-code, DI browser yang sama (masih session login).
+
+    Wajib dilakukan saat session masih aktif & proxy sama (window setalah signup).
+    Hinari CF block yang muncul belakangan di IP proxy."""
+    import urllib.request, urllib.parse
+    XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+    scope = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write"
+
+    # 1) request device code — via urllib server-side (bukan page fetch — CORS block)
+    import urllib.request, urllib.parse
+    XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+    scope = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write"
+    try:
+        dc_body = urllib.parse.urlencode({
+            "client_id": XAI_CLIENT_ID, "scope": scope, "referrer": "grok-build",
+        }).encode()
+        dc_req = urllib.request.Request("https://auth.x.ai/oauth2/device/code", data=dc_body, method="POST")
+        dc_req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        dc_req.add_header("User-Agent", "Mozilla/5.0")
+        with urllib.request.urlopen(dc_req, timeout=20) as r:
+            dc = json.loads(r.read().decode())
+    except Exception as e:
+        print(f"[oauth] device-code fail: {e}", flush=True)
+        return None
+    if not dc or not dc.get("device_code"):
+        print(f"[oauth] device-code gmau: {dc}", flush=True)
+        return None
+    print(f"[oauth] user_code={dc.get('user_code')}", flush=True)
+
+    # 2) buka verification page di tab baru (session & proxy masih sama)
+    verify_url = dc.get("verification_uri_complete")
+    try:
+        vpage = page.context.new_page()
+        vpage.goto(verify_url, wait_until="domcontentloaded", timeout=45000)
+        vpage.wait_for_timeout(4000)
+        # auto-approve
+        try:
+            vpage.get_by_role("button", name="Continue", exact=False).click(timeout=8000)
+            vpage.wait_for_timeout(2500)
+        except Exception:
+            pass
+        try:
+            vpage.get_by_role("button", name="Allow", exact=True).click(timeout=8000)
+            vpage.wait_for_timeout(1500)
+        except Exception:
+            try:
+                vpage.get_by_role("button", name="Allow All", exact=True).click(timeout=4000)
+            except Exception:
+                pass
+        vpage.close()
+    except Exception as e:
+        print(f"[oauth] approve page warning: {str(e)[:100]}", flush=True)
+
+    # 3) poll token — via urllib server-side
+    import time as _t3
+    for _ in range(24):
+        try:
+            tok_body = urllib.parse.urlencode({
+                "client_id": XAI_CLIENT_ID,
+                "device_code": dc["device_code"],
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            }).encode()
+            tok_req = urllib.request.Request("https://auth.x.ai/oauth2/token", data=tok_body, method="POST")
+            tok_req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            tok_req.add_header("User-Agent", "Mozilla/5.0")
+            with urllib.request.urlopen(tok_req, timeout=20) as r:
+                tr = json.loads(r.read().decode())
+        except Exception as e:
+            print(f"[oauth] poll fail: {e}", flush=True)
+            break
+        if tr.get("access_token"):
+            return tr
+        if tr.get("error") not in ("authorization_pending", "slow_down"):
+            print(f"[oauth] poll err: {tr}", flush=True)
+            return None
+        _t3.sleep(dc.get("interval", 5) or 5)
+    print("[oauth] token poll timeout", flush=True)
+    return None
+
+
 def _add_to_router(ctx, accounts: list[dict]):
     if not ROUTER9_URL or not accounts:
         return 0, 0, 0
