@@ -62,7 +62,7 @@ R9_TOKEN = _env("V2_R9_TOKEN", "")
 
 # ── VISION CAPTCHA (interactive Turnstile solver) via 9router vision model ─────
 # farm.py lama pakai ini utk lolos Turnstile image-puzzle yang gak bisa auto-click.
-CAPTCHA_MODEL = _env("GROK_CAPTCHA_MODEL", "openrouter/openai/gpt-4o")
+CAPTCHA_MODEL = _env("GROK_CAPTCHA_MODEL", "cx/gpt-5.6-luna")
 # API key 9router utk call vision (dari apiKeys table, e.g. hiyuki)
 CAPTCHA_API_KEY = _env("GROK_CAPTCHA_API_KEY", "")
 # Base API 9router (domain — pakai curl+UA utk hindari CF 1010)
