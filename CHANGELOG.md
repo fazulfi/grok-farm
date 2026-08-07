@@ -26,6 +26,14 @@ All notable changes to Grok Farm are documented here.
   Di Chrome modern patch malah menimpa nilai screenX/Y yang benar (anomali JS).
   Yang menentukan lolos Turnstile 2026: `channel='chrome'` + headed/xvfb + residential IP.
   `farm_v2.py` kini `V2_TURNSTILE_PATCH=0` (default off); opsi driver lanjutan: nodriver/patchright.
+- **INTEL FARMER 2026-08-07 — token health (`bfs`/`bot_flag_source`):** akun yang ke-flag
+  punya `"bfs":1` (atau `"bot_flag_source":1`) di payload JWT → thinking TIDAK jalan
+  (plenger). Akun sehat: scope `... conversations:read conversations:write` + referrer
+  (`grok-build`/`cli-proxy-api`). Ditambahkan:
+  - **`scan_tokens.py`** — decode JWT, deteksi flag, laporan distribusi scope/referrer.
+    Exit 2 kalau ada flag (buang); saran ganti domain kalau semua ke-flag.
+  - `farm_v2.py`: `V2_OAUTH_SCOPE` default + `conversations:*`, `V2_OAUTH_REFERRER=grok-build`,
+    `V2_CLIENT_VERSION` header — samakan dengan grok-build latest.
 - Doc sync: audit + prototype dicatat; production `farm.py` TIDAK diubah (Opsi A — modul paralel).
 
 ## [Unreleased]
