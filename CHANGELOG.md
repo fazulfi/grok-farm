@@ -2,6 +2,14 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.8.1] — 2026-08-07
+
+### Changed
+- **Vision Turnstile model → `cx/gpt-5.6-luna`** (wajib — user spec). Sebelumnya `openrouter/openai/gpt-4o`.
+  - Default di `farm_v2.py` + `.env` (GROK_CAPTCHA_MODEL).
+  - Verified: `cx/gpt-5.6-luna` vision call OK via 9router (baca screenshot Turnstile).
+- Farm 100 supervised restart dgn model baru (resume dari 20 akun).
+
 ## [v2.8.0-production] — 2026-08-07
 
 ### Added — PRODUCTION HARDENING
