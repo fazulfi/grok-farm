@@ -51,7 +51,8 @@ MAILLDEZ_DOMAINS = _env("V2_MAILLDEZ_DOMAINS", "").replace(" ", "").split(",") o
 ROUTER9_URL = _env("V2_ROUTER9_URL", "")
 ROUTER9_PASS = _env("V2_ROUTER9_PASS", "")
 HEADLESS = _env("V2_HEADLESS", "false").lower() in ("1", "true", "yes")
-PROXY = _env("V2_PROXY", "")  # optional per-run proxy server (http://user:pass@host:port)
+PROXY = _env("V2_PROXY", "")  # optional single proxy server OR file path (proxies.txt) via V2_PROXY_FILE
+PROXY_FILE = _env("V2_PROXY_FILE", "")
 OUT = Path(_env("V2_OUT", str(_ROOT / "v2_sso.txt")))
 
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
@@ -80,6 +81,150 @@ def _next_domain() -> str:
     d = MAILLDEZ_DOMAINS[_domain_idx % len(MAILLDEZ_DOMAINS)]
     _domain_idx += 1
     return d
+
+
+# ── IMAP OTP (Gmail, CF Email Routing → inbox) ───────────────────────────────
+import imaplib
+from email import message_from_bytes
+
+IMAP_USER = _env("GROK_IMAP_USER", "")
+IMAP_PASS = _env("GROK_IMAP_PASS", "").replace(" ", "")
+IMAP_HOST = _env("GROK_IMAP_HOST", "imap.gmail.com")
+IMAP_PORT = int(_env("GROK_IMAP_PORT", "993") or "993")
+
+
+def _imap_connect(proxy_url: str | None = None):
+    """Buka koneksi IMAP SSL — direct ATAU lewat HTTP CONNECT proxy (WebShare).
+
+    VPS idcloudhost SG blokir egress 993 langsung; via proxy CONNECT tunnel
+    berhasil (tested 2026-08-07, 3/10 proxy OK). Return imaplib instance."""
+    import socket
+    import ssl
+
+    if not proxy_url:
+        return imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=15)
+
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(proxy_url)
+        phost, pport = u.hostname, (u.port or 3128)
+        puser, ppass = u.username or "", u.password or ""
+    except Exception:
+        return imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=15)
+
+    import base64
+    # 1) establish raw TCP to proxy
+    sock = socket.create_connection((phost, int(pport)), timeout=15)
+    try:
+        # 2) HTTP CONNECT handshake
+        auth = base64.b64encode(f"{puser}:{ppass}".encode()).decode() if puser else ""
+        req = (
+            f"CONNECT {IMAP_HOST}:{IMAP_PORT} HTTP/1.1\r\n"
+            f"Host: {IMAP_HOST}:{IMAP_PORT}\r\n"
+        )
+        if auth:
+            req += f"Proxy-Authorization: Basic {auth}\r\n"
+        req += "Proxy-Connection: Keep-Alive\r\n\r\n"
+        sock.sendall(req.encode())
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = sock.recv(512)
+            if not chunk:
+                break
+            resp += chunk
+        if not (resp.startswith(b"HTTP/1.0 200") or resp.startswith(b"HTTP/1.1 200")):
+            raise ConnectionError(f"proxy CONNECT failed: {resp.split(b'\\r\\n')[0][:80]}")
+        # 3) wrap in TLS (SNI = imap host)
+        ctx = ssl.create_default_context()
+        tls = ctx.wrap_socket(sock, server_hostname=IMAP_HOST)
+    except Exception:
+        sock.close()
+        raise
+
+    # 4) subclass IMAP4 that uses the given connected+TLSed socket
+    class _IMAP4Via(imaplib.IMAP4):
+        def _create_socket(self, timeout):
+            return tls
+
+    mail = _IMAP4Via(IMAP_HOST, IMAP_PORT)
+    return mail
+
+def read_otp_from_imap(target_email: str, timeout: float = 120, proxy_url: str | None = None,
+                       since_ts: float | None = None) -> str | None:
+    """Poll Gmail IMAP utk xAI confirmation code addressed ke target_email (catch-all).
+    Mirip farm.py read_otp_from_imap_sync tapi versi kompak utk farm_v2.
+    proxy_url: http://user:pass@host:port — dipakai kalau egress 993 diblokir (via CONNECT).
+    since_ts: hanya proses email yg masuk setelah timestamp ini (hindari OTP lama/re-used)."""
+    if not IMAP_USER or not IMAP_PASS:
+        return None
+    target_lower = target_email.lower()
+    target_local = target_lower.split("@")[0]
+    start = time.time()
+    import email.utils as _eu
+    while time.time() - start < timeout:
+        try:
+            mail = _imap_connect(proxy_url)
+            mail.login(IMAP_USER, IMAP_PASS)
+            mail.select("INBOX")
+            st, msgs = mail.search(None, '(FROM "x.ai")')
+            mids = msgs[0].split() if msgs and msgs[0] else []
+            if not mids:
+                st, msgs = mail.search(None, '(SUBJECT "confirmation code")')
+                mids = msgs[0].split() if msgs and msgs[0] else []
+            for mid in reversed(mids[-60:]):
+                st, data = mail.fetch(mid, "(RFC822)")
+                if not data or not data[0]:
+                    continue
+                msg = message_from_bytes(data[0][1])
+                subj = (msg.get("Subject", "") or "")
+                # skip email yg masuk SEBELUM since_ts (re-used / stale OTP)
+                if since_ts is not None:
+                    try:
+                        date_str = msg.get("Date", "") or ""
+                        dt = _eu.parsedate_to_datetime(date_str)
+                        if dt and dt.timestamp() < since_ts:
+                            continue
+                    except Exception:
+                        pass
+                # perbaiki: cek SUBJECT dulu utk confirmation code + recipient di header
+                to_all = " ".join(filter(None, [
+                    msg.get("To", ""), msg.get("Delivered-To", ""),
+                    msg.get("X-Original-To", ""), msg.get("X-Forwarded-To", ""),
+                    msg.get("Envelope-To", ""), msg.get("Received", ""),
+                ])).lower()
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            try:
+                                body = part.get_payload(decode=True).decode("utf-8", "replace")
+                            except Exception:
+                                body = ""
+                            if body:
+                                break
+                else:
+                    try:
+                        body = msg.get_payload(decode=True).decode("utf-8", "replace")
+                    except Exception:
+                        body = str(msg.get_payload() or "")
+                # match recipient alias (catch-all): target di To/Delivered-To ATAU local-part di body
+                header_hit = (target_lower in to_all) or (len(target_local) >= 8 and target_local in to_all)
+                body_hit = target_lower in body.lower() or (len(target_local) >= 8 and target_local in body.lower())
+                if header_hit or body_hit or "confirmation code" in subj.lower():
+                    for txt in (subj, body):
+                        g = re.search(r"([A-Z0-9]{3}-[A-Z0-9]{3})", txt)
+                        if g:
+                            mail.logout()
+                            return g.group(1).replace("-", "")
+                        g = re.search(r"([A-Z0-9]{6})", txt)
+                        if g:
+                            mail.logout()
+                            return g.group(1)
+            mail.logout()
+        except Exception:
+            pass
+        time.sleep(4)
+    return None
 
 
 # ── Temp-mail (MAILLDEZ-compatible JSON API) ──────────────────────────────────
@@ -200,6 +345,51 @@ def _chrome_major() -> str:
         return "148"
 
 
+# ── Proxy pool (anti-plenger: satu proxy per akun, rotate) ───────────────────
+PROXY_POOL: list[str] = []
+
+def _normalize_proxy_entry(raw: str) -> str | None:
+    """Normalize proxy string ke URL Playwright: support host:port:user:pass dan http://user:pass@host:port."""
+    raw = (raw or "").strip()
+    if not raw or raw.startswith("#"):
+        return None
+    if "://" in raw:  # sudah URL penuh
+        return raw
+    p = raw.split(":")
+    if len(p) == 4:
+        host, port, user, password = p
+        return f"http://{user}:{password}@{host}:{port}"
+    if len(p) == 2:
+        return f"http://{p[0]}:{p[1]}"
+    return None
+
+def load_proxy_pool(path: str | None = None) -> list[str]:
+    """Load pool dari V2_PROXY_FILE (atau ./proxies.txt). Return list URL."""
+    p = path or PROXY_FILE or _env("V2_PROXY_FILE", str(_ROOT / "proxies.txt"))
+    fp = Path(os.path.expanduser(p))
+    out: list[str] = []
+    if fp.is_file():
+        for line in fp.read_text(errors="replace").splitlines():
+            u = _normalize_proxy_entry(line)
+            if u and u not in out:
+                out.append(u)
+    return out
+
+_proxy_idx = 0
+CURRENT_PROXY: str | None = None  # proxy yang sedang dipakai run ini (untuk IMAP OTP)
+
+def next_proxy() -> str | None:
+    """Round-robin ambil proxy berikutnya dari pool."""
+    global _proxy_idx, CURRENT_PROXY
+    if not PROXY_POOL:
+        CURRENT_PROXY = PROXY or None
+        return CURRENT_PROXY
+    px = PROXY_POOL[_proxy_idx % len(PROXY_POOL)]
+    _proxy_idx += 1
+    CURRENT_PROXY = px
+    return px
+
+
 def _launch_ctx(p, load_extension: bool = True):
     args = [
         "--no-sandbox",
@@ -219,9 +409,45 @@ def _launch_ctx(p, load_extension: bool = True):
         viewport={"width": 1280, "height": 1024},
         ignore_default_args=ignore_default,
     )
-    if PROXY:
-        kwargs["proxy"] = {"server": PROXY}
+    px = next_proxy()  # rotate pool: satu proxy per akun (anti-plenger)
+    if px:
+        # WebShare: JANGAN pakai URL-embedded creds di `server` (x ERR_INVALID_AUTH_CREDENTIALS).
+        # Wajib `server` bare + username/password terpisah (split-creds). Tested OK 2026-08-07.
+        server = _proxy_server_bare(px)
+        kwargs["proxy"] = {
+            "server": server,
+            "username": _proxy_user(px),
+            "password": _proxy_pass(px),
+        }
     return p.chromium.launch_persistent_context(**kwargs)
+
+
+def _proxy_server_bare(url: str) -> str:
+    """Kembalikan server proxy TANPA creds dari URL http://user:pass@host:port."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        host = u.hostname or ""
+        port = u.port or 80
+        return f"http://{host}:{port}"
+    except Exception:
+        return url
+
+
+def _proxy_user(url: str) -> str | None:
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).username or None
+    except Exception:
+        return None
+
+
+def _proxy_pass(url: str) -> str | None:
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).password or None
+    except Exception:
+        return None
 
 
 def _setup_ctx(ctx, chrome_v: str):
@@ -238,6 +464,8 @@ def _setup_ctx(ctx, chrome_v: str):
 
 
 # ── Signup flow (Audit §4 + dzDev37 flow) ─────────────────────────────────────
+_RUN_START_TS = time.time()  # set saat import; dipakai read_otp utk skip OTP lama
+
 def _signup_one(ctx, chrome_v: str) -> dict:
     page = ctx.new_page()
     try:
@@ -259,10 +487,20 @@ def _signup_one(ctx, chrome_v: str) -> dict:
         # 2 email form
         page.get_by_text("Sign up with email").click(timeout=8000)
         page.wait_for_selector("input[type=email]", timeout=8000)
-        if not MAILLDEZ:
-            raise RuntimeError("V2_MAILLDEZ_URL required (temp-mail API)")
-        mail = TempMail(MAILLDEZ)
-        addr = mail.create()
+        # pilih sumber email: MAILLDEZ temp-mail ATAU generate random@catch-all-domain + IMAP
+        if MAILLDEZ:
+            mail = TempMail(MAILLDEZ)
+            addr = mail.create()
+        elif IMAP_USER and _env("GROK_EMAIL_DOMAINS"):
+            import random as _r
+            import string as _st
+            domains = _env("GROK_EMAIL_DOMAINS").replace(" ", "").split(",")
+            local = "".join(_r.choices(_st.ascii_lowercase + _st.digits, k=12))
+            addr = f"{local}@{_r.choice(domains)}"
+            mail = None
+            print(f"[otp] pakai IMAP Gmail + catch-all domain: {addr}", flush=True)
+        else:
+            raise RuntimeError("butuh V2_MAILLDEZ_URL ATAU GROK_IMAP_* + GROK_EMAIL_DOMAINS")
         page.locator("input[type=email]").fill(addr)
         page.locator("input[type=email]").press("Enter")
         try:
@@ -273,13 +511,96 @@ def _signup_one(ctx, chrome_v: str) -> dict:
                 page.wait_for_selector("input[name=code]", timeout=15000)
             except Exception:
                 raise RuntimeError("could not reach OTP screen")
-        # 3 OTP
-        code = mail.wait_code(120)
+        # 3 OTP — ambil via MAILLDEZ atau IMAP Gmail (via proxy yang sama, anti-block)
+        if mail is not None:
+            code = mail.wait_code(120)
+        else:
+            code = read_otp_from_imap(addr, timeout=120, proxy_url=CURRENT_PROXY,
+                                      since_ts=_RUN_START_TS)
         if not code:
             raise RuntimeError("OTP timeout 120s")
-        page.locator("input[name=code]").first.fill(code, timeout=15000)
-        page.keyboard.press("Enter")
-        page.wait_for_selector("input[name=givenName]", timeout=20000)
+        print(f"[otp] OTP received: {code}", flush=True)
+        # x.ai OTP UI = 6 kotak terpisah (input[maxlength="1"]), butuh waktu render.
+        # WAIT dulu: tunggu 6 kotak muncul, lalu fill per-char.
+        # Jika tidak, fill hidden input name=code (yang mungkin tidak diproses React).
+        import time as _t
+        _t.sleep(3)
+        otp_chars = re.sub(r"[^A-Za-z0-9]", "", code.upper())
+        # Strategi farm.py (proven): click kotak pertama, lalu KEYBOARD type seluruh
+        # sequence → React auto-advance ke 6 kotak. JANGAN pakai .fill() (gagal utk
+        # kotak OTP React yang tidak input biasa).
+        boxes = page.locator('input[maxlength="1"]')
+        _ok_box = False
+        try:
+            n = boxes.count()
+            if n >= 1:
+                _ok_box = True
+        except Exception:
+            n = 0
+        if not _ok_box:
+            # coba cari penerima OTP lain (name=code atau autocomplete)
+            code_inp = page.locator('input[name="code"], input[autocomplete="one-time-code"]')
+            if code_inp.count():
+                try:
+                    code_inp.first.click(timeout=2000, force=True)
+                    _t.sleep(0.05)
+                    page.keyboard.press("Control+a"); page.keyboard.press("Backspace")
+                    page.keyboard.type(otp_chars, delay=40)
+                    print("[otp] OTP typed via name=code keyboard", flush=True)
+                except Exception as e:
+                    print(f"[otp] name=code keyboard fail: {e}", flush=True)
+                    page.keyboard.type(otp_chars, delay=40)
+        else:
+            # 6 boxes via keyboard typing
+            for _k in range(3):
+                try:
+                    boxes.first.click(timeout=1200, force=True)
+                    _t.sleep(0.05)
+                    page.keyboard.press("Control+a"); page.keyboard.press("Backspace")
+                    page.keyboard.type(otp_chars[:6], delay=40)
+                    _t.sleep(0.2)
+                    # verify
+                    vals = []
+                    for _b in range(min(6, boxes.count())):
+                        try:
+                            vals.append(boxes.nth(_b).input_value())
+                        except Exception:
+                            vals.append("?")
+                    print(f"[otp] OTP typed boxes: {''.join(vals)}", flush=True)
+                    if "".join(vals).upper() == otp_chars[:6]:
+                        break
+                except Exception as e:
+                    print(f"[otp] OTP box typing warn: {e}", flush=True)
+                _t.sleep(0.3)
+        _t.sleep(0.5)
+        # klik Confirm email / Enter
+        try:
+            page.get_by_role("button", name="Confirm email").click(timeout=5000)
+            print("[otp] Confirmed via Confirm email btn", flush=True)
+        except Exception:
+            try:
+                page.get_by_role("button", name="Confirm").click(timeout=3000)
+            except Exception:
+                page.keyboard.press("Enter")
+        print(f"[otp] OTP submitted", flush=True)
+        # Wait longer for "Complete your sign up" page to fully load
+        try:
+            page.wait_for_selector("input[name=givenName]", timeout=30000)
+        except Exception:
+            # Fallback: check if we're on the right URL or look for any input box
+            print("[otp] givenName not found in 30s, checking current page...", flush=True)
+            page.screenshot(path="screenshot_after_otp.png", timeout=30000)
+            # Check if on grok.com already (success redirect)
+            if "grok.com" in page.url:
+                print("[otp] ALREADY ON grok.com - registration complete!", flush=True)
+                return {
+                    "email": addr,
+                    "password": PASSWORD,
+                    "status": "redirected",
+                    "final_url": page.url,
+                    "timestamp": int(time.time()),
+                }
+            raise RuntimeError("OTP success but couldn't find givenName field")
         # 4 name + password
         local = addr.split("@")[0]
         parts = re.split(r"[._\-]", local)
@@ -288,16 +609,63 @@ def _signup_one(ctx, chrome_v: str) -> dict:
         page.locator("input[name=givenName]").fill(given)
         page.locator("input[name=familyName]").fill(family)
         page.locator("input[name=password]").fill(PASSWORD)
-        # 5 turnstile auto-solve (extension) → cf-turnstile-response
+        # 5 turnstile — click checkbox di IFRAME cloudflare (bukan checkbox cookie banner!)
+        import time as _t2
+        # dismiss cookie banner dulu (OneTrust) — checkbox-nya ngaco dengan Turnstile
+        try:
+            page.locator("#onetrust-accept-btn-handler").click(timeout=2000, force=True)
+        except Exception:
+            try:
+                page.get_by_role("button", name="Accept All").click(timeout=2000)
+            except Exception:
+                pass
+        _t2.sleep(0.5)
         tok = ""
-        for _ in range(40):
-            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+        for _attempt in range(5):
+            # klik checkbox Turnstile di iframe challenges.cloudflare.com
+            clicked = False
+            for fr in page.frames:
+                fname = (fr.url or "")
+                if "challenges.cloudflare.com" in fname or "turnstile" in fname:
+                    try:
+                        cb = fr.locator('input[type="checkbox"]')
+                        if cb.count():
+                            cb.first.click(timeout=3000)
+                            print(f"[turnstile] clicked checkbox in frame {fname[:60]}", flush=True)
+                            clicked = True
+                    except Exception as e:
+                        print(f"[turnstile] frame click warn: {str(e)[:80]}", flush=True)
+                    break
+            if not clicked:
+                # fallback: klik label di iframe (Turnstile checkbox bisa jadi div)
+                for fr in page.frames:
+                    if "challenges.cloudflare.com" in (fr.url or ""):
+                        try:
+                            fr.locator("body").click(position={"x": 20, "y": 20}, timeout=2000)
+                            print("[turnstile] clicked iframe body (fallback)", flush=True)
+                        except Exception:
+                            pass
+            # baca token (refresh)
+            for _w in range(12):
+                try:
+                    tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+                except Exception:
+                    tok = ""
+                if tok:
+                    break
+                _t2.sleep(1)
             if tok:
                 break
-            page.wait_for_timeout(1000)
+            print(f"[turnstile] attempt {_attempt+1}: token kosong, retry...", flush=True)
+            _t2.sleep(2)
         if not tok:
-            raise RuntimeError("Turnstile timeout 40s")
-        page.get_by_role("button", name="Complete sign up").click()
+            page.screenshot(path="screenshot_turnstile_fail.png")
+            raise RuntimeError("Turnstile timeout (checkbox tidak bisa di-solve otomatis)")
+        print("[turnstile] token OK", flush=True)
+        try:
+            page.get_by_role("button", name="Complete sign up").click(timeout=5000)
+        except Exception:
+            page.keyboard.press("Enter")
         # 6 redirect to grok.com or detect SSO
         redirected = False
         for _ in range(30):
@@ -423,7 +791,15 @@ def main() -> int:
         return 0
 
     chrome_v = _chrome_major()
-    results = []
+    results: list = []
+    global PROXY_POOL
+    PROXY_POOL = load_proxy_pool()
+    if PROXY_POOL:
+        print(f"[farm] proxy pool: {len(PROXY_POOL)} proxy (round-robin per akun)")
+    elif PROXY:
+        print("[farm] proxy tunggal (V2_PROXY)")
+    else:
+        print("[farm] WARN: tanpa proxy — langsung dari IP VPS (risiko flag tinggi)")
     with sync_playwright() as p:
         ctx = _launch_ctx(p, load_extension=True)
         _setup_ctx(ctx, chrome_v)
