@@ -2,7 +2,34 @@
 
 All notable changes to Grok Farm are documented here.
 
+## [v2.4.0-audit] — 2026-08-07
+
+### Added
+- **Audit metode vs realita xAI 2026-08-07** (`docs/AUDIT-2026-08-07.md`): probe live
+  (device_authorization_endpoint aktif, vector-code returns 200 w/ user_code, expires_in 1800,
+  token poll → `authorization_pending`), scope OIDC resmi, dan kesimpulan **free-tier
+  nilainya turun** (grok-4.5/grok-build digerbang di SuperGrok / X Premium+; issue #26847).
+- **Prototipe metode baru `farm_v2.py`** (modul paralel — TIDAK menyentuh farm.py/akun.db):
+  - Engine: Playwright `channel='chrome'` (ganti Camoufox click-only).
+  - Email: MAILLDEZ-compatible temp-mail API (`V2_MAILLDEZ_URL`/`V2_MAILLDEZ_DOMAINS`) — bukan IMAP.
+  - Token: **OAuth device-code resmi** `auth.x.ai/oauth2/device/code` → `xai_poll_token` (headless, tanpa callback server).
+  - 9Router: `--router` pakai SSO cookies + `/api/oauth/grok-cli/*` device-code consent automation.
+  - `--dry-run`: validasi flow + reach device-code live tanpa bikin akun (DIVERIFIED OK).
+- `turnstilePatch/` (manifest.json + script.js) di-copy ke repo — **fallback eksperimen saja**.
+- `setup_v2.sh` — one-shot prep (Chrome + deps + verifikasi) untuk VPS farm baru.
+- `.env.v2.example` — blok config `V2_*` (MAILLDEZ, password, 9Router, toggle patch).
+- `docs/RESEARCH-2026-08-07-turnstilepatch.md` — verifikasi independen metode turnstile.
+
+### Changed
+- **KOREKSI KRITIS:** turnstilePatch **bukan lagi solusi** — bug Chromium #40280325
+  (dasar teknik ini) **di-fix Google Sept 2025** (CL 6917162, rilis ~Chrome 131/132).
+  Di Chrome modern patch malah menimpa nilai screenX/Y yang benar (anomali JS).
+  Yang menentukan lolos Turnstile 2026: `channel='chrome'` + headed/xvfb + residential IP.
+  `farm_v2.py` kini `V2_TURNSTILE_PATCH=0` (default off); opsi driver lanjutan: nodriver/patchright.
+- Doc sync: audit + prototype dicatat; production `farm.py` TIDAK diubah (Opsi A — modul paralel).
+
 ## [Unreleased]
+
 
 ### Changed
 

@@ -43,3 +43,7 @@ Thumbs.db
 # Deploy scratch
 /tmp/
 .deploy/
+
+.venv-v2/
+v2_sso.txt
+__pycache__/
