@@ -592,44 +592,44 @@ def _solve_turnstile(page, max_wait: int = 60) -> bool:
             tok = ""
         if tok:
             return True
-        # 2) vision utk interactive challenge
-        if not clicked:
-            try:
-                img = page.screenshot(full_page=False)
-                b64 = _b64.b64encode(img).decode()
-                resp = _call_vision_model(b64, _VISION_TURNSTILE_PROMPT)
-                if resp:
-                    up = resp.strip().upper()
-                    print(f"[captcha] vision: {resp[:120]}", flush=True)
-                    if "NO_CAPTCHA" in up:
-                        # cek token — kalau sudah ada, done
+        # 2) vision utk interactive challenge — PANGGIL SELALU kalau token belum ada
+        # (sebelumnya hanya kalau checkbox tidak ketemu → vision skip saat checkbox
+        #  ketemu tp token tak generate (interactive puzzle). Fix: vision selalu.)
+        try:
+            img = page.screenshot(full_page=False)
+            b64 = _b64.b64encode(img).decode()
+            resp = _call_vision_model(b64, _VISION_TURNSTILE_PROMPT)
+            if resp:
+                up = resp.strip().upper()
+                print(f"[captcha] vision: {resp[:120]}", flush=True)
+                if "NO_CAPTCHA" in up:
+                    try:
+                        tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+                    except Exception:
+                        tok = ""
+                    if tok:
+                        return True
+                if "CHECKBOX" in up:
+                    _try_click_turnstile(page, attempts=2)
+                    _t.sleep(2.0)
+                    continue
+                coords = _parse_vision_clicks(resp)
+                if coords:
+                    try:
+                        size = page.evaluate("() => ({w: Math.max(document.documentElement.scrollWidth, window.innerWidth), h: Math.max(document.documentElement.scrollHeight, window.innerHeight)})")
+                    except Exception:
+                        size = {"w": 1280, "h": 1024}
+                    w, h = size["w"], size["h"]
+                    for px, py in coords:
                         try:
-                            tok = page.evaluate("document.querySelector('input[name=cf-turnstile-response]')?.value || ''")
+                            page.mouse.click((px / 100.0) * w, (py / 100.0) * h)
                         except Exception:
-                            tok = ""
-                        if tok:
-                            return True
-                    if "CHECKBOX" in up:
-                        _try_click_turnstile(page, attempts=2)
-                        _t.sleep(2.0)
-                        continue
-                    coords = _parse_vision_clicks(resp)
-                    if coords:
-                        try:
-                            size = page.evaluate("() => ({w: Math.max(document.documentElement.scrollWidth, window.innerWidth), h: Math.max(document.documentElement.scrollHeight, window.innerHeight)})")
-                        except Exception:
-                            size = {"w": 1280, "h": 1024}
-                        w, h = size["w"], size["h"]
-                        for px, py in coords:
-                            try:
-                                page.mouse.click((px / 100.0) * w, (py / 100.0) * h)
-                            except Exception:
-                                pass
-                            _t.sleep(0.4)
-                        _t.sleep(2.0)
-                        continue
-            except Exception as e:
-                print(f"[captcha] vision fail: {e}", flush=True)
+                            pass
+                        _t.sleep(0.4)
+                    _t.sleep(2.0)
+                    continue
+        except Exception as e:
+            print(f"[captcha] vision fail: {e}", flush=True)
         _t.sleep(1.2)
     return False
 
