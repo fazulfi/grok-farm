@@ -3062,6 +3062,19 @@ async def register_one_account(attempt_num: int, semaphore: asyncio.Semaphore) -
 _results_lock = asyncio.Lock()
 
 
+def _token_bsf_flagged(token: str):
+    """Auto-gate BSF: decode JWT payload, True kalau flag plenger (bfs/bot_flag_source)."""
+    if not token or not token.startswith("ey"):
+        return False, {}
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return False, {}
+    flagged = bool(payload.get("bfs")) or bool(payload.get("bot_flag_source"))
+    return flagged, payload
+
 async def save_result_to_file(result: dict):
     """Append success to JSON + one-line TXT (email|password|access_token|refresh_token)."""
     async with _results_lock:
@@ -3077,10 +3090,21 @@ async def save_result_to_file(result: dict):
         RESULTS_JSON.write_text(json.dumps(results, indent=2))
 
         tokens = result.get("tokens") or {}
+        token = str(tokens.get("access_token") or "")
+        # Auto-gate BSF: flag plenger JANGAN masuk hasil sukses
+        flagged, payload = _token_bsf_flagged(token)
+        if flagged:
+            email = (str(result.get("email") or "")).lower()
+            flags = [k for k in ("bfs", "bot_flag_source") if payload.get(k)]
+            fl = ",".join(flags)
+            with open(RESULTS_ROOT / "plenger.txt", "a", encoding="utf-8") as f:
+                f.write(email + "\t" + fl + "\n")
+            vlog("[BSF] DROP " + email + " (" + fl + ") -> plenger.txt")
+            return
         line = "|".join([
             str(result.get("email") or ""),
             str(result.get("password") or ""),
-            str(tokens.get("access_token") or ""),
+            token,
             str(tokens.get("refresh_token") or ""),
             str(tokens.get("expires_at") or ""),
         ])
