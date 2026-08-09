@@ -1,6 +1,6 @@
 ﻿# Grok Farm
 
-**Enterprise autofarm + auto-inject pipeline for xAI / Grok CLI OAuth credentials into 9router.**
+**autofarm + auto-inject pipeline for xAI / Grok CLI OAuth credentials into 9router.**
 
 | | |
 |--|--|
