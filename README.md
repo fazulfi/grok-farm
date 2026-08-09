@@ -12,10 +12,11 @@
 ## What it does
 
 1. **Farms** Grok / xAI accounts (email OTP → profile → Turnstile → OAuth PKCE tokens)
-2. **Records** pipeline state in SQLite (`akun.db`: `farmed` → `injected` / `error`) — inject queue marks, not session management
-3. **Syncs** residential proxies from **9router proxyPools** (source of truth)
-4. **Injects immediately** into 9router as **Grok CLI (Grok Build)** + **xAI** (on-path; steady state `farmed` ≈ 0)
-5. **Runs unlimited** under systemd (`Restart=always`)
+2. **Auto BSF-gate** — tiap akun di-scan JWT (`bfs` / `bot_flag_source`) saat save; akun flag (plenger) dibuang ke `results/plenger.txt`, tidak masuk `accounts.txt`. Hasil sukses otomatis BSF-1/BSF-2 = 0.
+3. **Records** pipeline state in SQLite (`akun.db`: `farmed` → `injected` / `error`) — inject queue marks, not session management
+4. **Syncs** residential proxies from **9router proxyPools** (source of truth)
+5. **Injects immediately** into 9router as **Grok CLI (Grok Build)** + **xAI** (on-path; steady state `farmed` ≈ 0)
+6. **Runs unlimited** under systemd (`Restart=always`)
 
 **Out of scope:** browser re-auth, refresh-token session recovery, keeping injected tokens “alive” after handoff. After inject, token alive/dead is a **9router / consumer** concern. Soft probe/JWT meta on the farm is optional inventory noise only.
 
