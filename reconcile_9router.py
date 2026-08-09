@@ -45,7 +45,7 @@ SSH = [
     "StrictHostKeyChecking=no",
     "-o",
     "ConnectTimeout=15",
-    os.environ.get("GROK_9R_SSH") or "root@49.12.82.34",
+    os.environ.get("GROK_9R_SSH") or "root@GW_IP",
     "-p",
     os.environ.get("GROK_9R_SSH_PORT") or "39999",
 ]
@@ -453,7 +453,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     report = reconcile(gateway, accounts)
     report["db"] = args.db
     report["remote_list"] = REMOTE_LIST
-    report["ssh_target"] = os.environ.get("GROK_9R_SSH") or "root@49.12.82.34"
+    report["ssh_target"] = os.environ.get("GROK_9R_SSH") or "root@GW_IP"
 
     write_stats: Optional[dict[str, int]] = None
     if args.write_notes:

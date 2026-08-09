@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env bash
 # Backup secrets + inventory from a farm VPS (excludes .venv, screenshots).
-# Usage: ./scripts/backup_farm.sh magadirxwin@FARM_IP ./backups [age1recipient]
+# Usage: ./scripts/backup_farm.sh USER@FARM_IP ./backups [age1recipient]
 # If AGE recipient given or AGE_RECIPIENT set, output is .tgz.age
 set -euo pipefail
 

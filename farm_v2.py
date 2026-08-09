@@ -66,7 +66,7 @@ CAPTCHA_MODEL = _env("GROK_CAPTCHA_MODEL", "cx/gpt-5.6-luna")
 # API key 9router utk call vision (dari apiKeys table, e.g. hiyuki)
 CAPTCHA_API_KEY = _env("GROK_CAPTCHA_API_KEY", "")
 # Base API 9router (domain — pakai curl+UA utk hindari CF 1010)
-CAPTCHA_API_URL = _env("GROK_CAPTCHA_API_URL", "https://router.markettabrak.biz.id/v1/chat/completions")
+CAPTCHA_API_URL = _env("GROK_CAPTCHA_API_URL", "https://router.YOURDOMAIN.com/v1/chat/completions")
 
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"

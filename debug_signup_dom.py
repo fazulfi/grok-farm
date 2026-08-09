@@ -34,7 +34,7 @@ with sync_playwright() as p:
         ctx.close(); sys.exit(1)
     import random as r, string as st
     local = "".join(r.choices(st.ascii_lowercase + st.digits, k=12))
-    addr = f"{local}@gogoligo.my.id"
+    addr = f"{local}@YOURDOMAIN.com"
     print("ADDR:", addr, flush=True)
     page.locator("input[type=email]").fill(addr)
     page.locator("input[type=email]").press("Enter")

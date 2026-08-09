@@ -24,15 +24,15 @@
 
 | Tag | IP | Concurrent | Mid-drain | Notes |
 |-----|-----|------------|-----------|-------|
-| grok2 | `157.245.55.62` | **3** | off | S3 `farm-vps/grok2` |
-| grok3 | `168.144.36.46` | **3** | off | fleet digest **leader**; `farm-vps/grok3` |
-| grok4 | `104.248.157.41` | **3** | 120s | mid-drain host; `farm-vps/grok4` |
-| grok5 | `168.144.37.202` | **3** | off | `farm-vps/grok5` |
-| grok6 | `167.71.208.99` | **3** | off | `farm-vps/grok6` |
+| grok2 | `VPS_IP1` | **3** | off | S3 `farm-vps/grok2` |
+| grok3 | `VPS_IP2` | **3** | off | fleet digest **leader**; `farm-vps/grok3` |
+| grok4 | `VPS_IP3` | **3** | 120s | mid-drain host; `farm-vps/grok4` |
+| grok5 | `VPS_IP4` | **3** | off | `farm-vps/grok5` |
+| grok6 | `VPS_IP5` | **3** | off | `farm-vps/grok6` |
 
-OTP domains (live, 3): `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` (Pattern B multi-IMAP).
+OTP domains (live, 3): `YOURDOMAIN.com`, `YOURDOMAIN.com`, `YOURDOMAIN.com` (Pattern B multi-IMAP).
 
-User/app on all farmers: `magadirxwin` / `/home/magadirxwin/grok-farm`. Gateway: `49.12.82.34:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
+User/app on all farmers: `USER` / `/home/USER/grok-farm`. Gateway: `GW_IP:39999`. Full multi-VPS rules: [CAPACITY.md](./CAPACITY.md) §6.2.
 
 ### Auto import / inject (brutal v5)
 
@@ -44,7 +44,7 @@ Pipeline is automatic when farmer runs as the **non-root** user:
 
 ```bash
 # Fix if inject stuck (common after root-run tests)
-sudo chown magadirxwin:magadirxwin ~/grok-farm/workflow.log ~/grok-farm/farm_brutal.log
+sudo chown USER:USER ~/grok-farm/workflow.log ~/grok-farm/farm_brutal.log
 # Verify auto path
 grep -E 'SUMMARY|Permission denied|import\+workflow|mid-drain|Brutal Farmer v' ~/grok-farm/farm_brutal.log | tail -30
 ```
@@ -219,10 +219,10 @@ python3 check_status.py
 cd ~/grok-farm
 # Example: live production pool (update when domains change)
 grep -q '^GROK_EMAIL_DOMAINS=' .env \
-&& sed -i 's|^GROK_EMAIL_DOMAINS=.*|GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site|' .env \
-|| echo 'GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site' >> .env
+&& sed -i 's|^GROK_EMAIL_DOMAINS=.*|GROK_EMAIL_DOMAINS=YOURDOMAIN.com,YOURDOMAIN.com,YOURDOMAIN.com|' .env \
+|| echo 'GROK_EMAIL_DOMAINS=YOURDOMAIN.com,YOURDOMAIN.com,YOURDOMAIN.com' >> .env
 # Keep legacy key in sync (optional)
-sed -i 's|^GROK_EMAIL_DOMAIN=.*|GROK_EMAIL_DOMAIN=markettabrak.my.id|' .env
+sed -i 's|^GROK_EMAIL_DOMAIN=.*|GROK_EMAIL_DOMAIN=YOURDOMAIN.com|' .env
 # Strategy: round_robin (recommended) = A,B,A,B… across healthy domains
 #            random      = weighted random (identity.weight)
 grep -q '^GROK_EMAIL_DOMAIN_STRATEGY=' .env \
@@ -294,7 +294,7 @@ python3 check_status.py
 # expect: identity domains=2 pool lists both; strategy=round_robin
 # domain_stats: tracks OTP/farm success; auto-skips dead domains after consecutive fails
 # After picks: alternate domains in farm.log (round_robin)
-tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|markettabrak'
+tail -f results/batch_*/farm.log | grep -E 'start|wait_otp|OK|FAIL|domain'
 ```
 
 #### Domain health auto-skip
@@ -431,7 +431,7 @@ See RUNBOOK **R12**.
 ### Operator pull backup
 
 ```bash
-./scripts/backup_farm.sh magadirxwin@FARM_IP ./backups age1...
+./scripts/backup_farm.sh USER@FARM_IP ./backups age1...
 # produces .tgz.age when recipient set
 ```
 
@@ -439,13 +439,13 @@ See RUNBOOK **R12**.
 
 ```bash
 # Encrypted
-./scripts/restore_farm.sh magadirxwin@FARM_IP ./backups/xxx.tgz.age ~/.config/grok-farm/age.identity
+./scripts/restore_farm.sh USER@FARM_IP ./backups/xxx.tgz.age ~/.config/grok-farm/age.identity
 
 # Manual (stops farmer — confirm first)
 systemctl stop grok-farmer
 cp akun.db akun.db.bak
 # extract credentials/akun.db from decrypted payload
-chown magadirxwin:magadirxwin ~/grok-farm/akun.db
+chown USER:USER ~/grok-farm/akun.db
 chmod 600 ~/grok-farm/akun.db
 systemctl start grok-farmer
 ```

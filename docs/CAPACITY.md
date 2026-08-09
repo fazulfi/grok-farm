@@ -103,22 +103,22 @@ Env for stage 1: `GROK_EMAIL_DOMAINS=a.com,b.com` (same `GROK_IMAP_*`).
 
 | Tag | IP | Spec | Concurrent | Mid-drain | Notes |
 |-----|-----|------|------------|-----------|-------|
-| grok2 | `157.245.55.62` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
-| grok3 | `168.144.36.46` | 4 vCPU / 8G / 160G | **3** | off | fleet digest **leader** |
-| grok4 | `104.248.157.41` | 4 vCPU / 8G / 160G | **3** | **120s** | only host with mid-drain |
-| grok5 | `168.144.37.202` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
-| grok6 | `167.71.208.99` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| grok2 | `VPS_IP1` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| grok3 | `VPS_IP2` | 4 vCPU / 8G / 160G | **3** | off | fleet digest **leader** |
+| grok4 | `VPS_IP3` | 4 vCPU / 8G / 160G | **3** | **120s** | only host with mid-drain |
+| grok5 | `VPS_IP4` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
+| grok6 | `VPS_IP5` | 4 vCPU / 8G / 160G | **3** | off | staggered inject |
 
-OTP domains (live, 3): `markettabrak.biz.id` + `markettabrak.my.id` + `markettabrak.site` (CF Email Routing → Gmail Pattern B).
+OTP domains (live, 3): `YOURDOMAIN.com` + `YOURDOMAIN.com` + `YOURDOMAIN.com` (CF Email Routing → Gmail Pattern B).
 
 **Must on every farmer host:**
 
 | Setting | Value |
 |---------|--------|
-| User / app | `magadirxwin` / `/home/magadirxwin/grok-farm` |
+| User / app | `USER` / `/home/USER/grok-farm` |
 | `GROK_EMAIL_STYLE` | `crypto` (multi-VPS collision hygiene) |
 | `GROK_PROXY_FILE` | `.../usa_proxies.txt` (sync from 9router SoT) |
-| `GROK_9R_*` | `root@49.12.82.34` · port `39999` · host key |
+| `GROK_9R_*` | `root@GW_IP` · port `39999` · host key |
 | Proxy pool | soft-filter sync; empty file → skip farm round |
 | Secrets | `.env` + `identities.json` chmod **600**; quote passwords with `#`/`&` |
 | SSH | key-only root; farmer ed25519 on 9router `authorized_keys` |

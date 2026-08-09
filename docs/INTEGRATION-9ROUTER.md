@@ -15,7 +15,7 @@ Bridge farmed Grok OAuth tokens into 9router so clients can call models (includi
 
 | Item | Value (example) |
 |------|-----------------|
-| Gateway SSH | `root@49.12.82.34 -p 39999` |
+| Gateway SSH | `root@GW_IP -p 39999` |
 | Gateway HTTP | `http://127.0.0.1:20128` (loopback on gateway) |
 | Health | `GET /api/health` → `{"ok":true}` |
 | CLI auth header | `x-9r-cli-token: <16-char machine token>` |

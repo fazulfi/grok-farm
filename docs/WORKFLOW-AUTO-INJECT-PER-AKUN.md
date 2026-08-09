@@ -22,7 +22,7 @@ farm_v2.py (V2_AUTO_INJECT=1)
 
 ```bash
 V2_AUTO_INJECT=1
-V2_R9_BASE=https://router.markettabrak.biz.id   # atau http://127.0.0.1:20228 (gateway host)
+V2_R9_BASE=https://router.YOURDOMAIN.com   # atau http://127.0.0.1:20228 (gateway host)
 V2_R9_TOKEN=<cli-token>   # 16-char sha256(machineId + "9r-cli-auth" + cliSecret)[:16]
 ```
 

@@ -21,7 +21,7 @@ def hdr(v):
 farm_v2.PROXY_POOL = farm_v2.load_proxy_pool()
 px = farm_v2.next_proxy()
 m = farm_v2._imap_connect(px)
-m.login("adisantososaja676@gmail.com", "hjvifrbobkysznbh")
+m.login("your-gmail@gmail.com", "hjvifrbobkysznbh")
 m.select("INBOX")
 st, data = m.search(None, '(FROM "x.ai")')
 ids = data[0].split()

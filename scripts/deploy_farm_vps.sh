@@ -1,8 +1,8 @@
 ﻿#!/usr/bin/env bash
 # Deploy / update Grok Farm on a remote VPS from this git repo.
 # Usage:
-#   ./scripts/deploy_farm_vps.sh magadirxwin@FARM_IP
-#   ./scripts/deploy_farm_vps.sh magadirxwin@FARM_IP --branch main
+#   ./scripts/deploy_farm_vps.sh USER@FARM_IP
+#   ./scripts/deploy_farm_vps.sh USER@FARM_IP --branch main
 set -euo pipefail
 
 TARGET="${1:-}"
@@ -57,7 +57,7 @@ install_unit() {
   if [[ "\$src" == *.timer ]]; then
     cp "\$src" "\$tmp"
   else
-    sed "s/magadirxwin/\$USER/g; s|/home/magadirxwin|\$HOME|g" "\$src" > "\$tmp"
+    sed "s/USER/\$USER/g; s|/home/USER|\$HOME|g" "\$src" > "\$tmp"
   fi
   sudo cp "\$tmp" "/etc/systemd/system/\${dest_name}"
   rm -f "\$tmp"

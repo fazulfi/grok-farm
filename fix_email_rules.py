@@ -4,7 +4,7 @@ import json, os, sys, urllib.request, urllib.error
 
 TOK = os.environ.get("CF_TOKEN", os.environ.get("CLOUDFLARE_API_TOKEN", ""))
 API = "https://api.cloudflare.com/client/v4"
-DEST = "adisantososaja676@gmail.com"
+DEST = "your-gmail@gmail.com"
 
 def req(m, p, b=None):
     data = json.dumps(b).encode() if b is not None else None

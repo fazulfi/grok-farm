@@ -19,7 +19,7 @@ payload = {
     "max_tokens": 200,
 }
 req = urllib.request.Request(
-    "https://router.markettabrak.biz.id/v1/chat/completions",
+    "https://router.YOURDOMAIN.com/v1/chat/completions",
     data=json.dumps(payload).encode(),
     headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
     method="POST",

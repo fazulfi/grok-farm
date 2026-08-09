@@ -55,6 +55,7 @@ except ImportError:
 
 try:
     from camoufox.async_api import AsyncCamoufox
+    from camoufox.addons import DefaultAddons
 except ImportError:
     print("ERROR: camoufox not installed. Run: ./install.sh", flush=True)
     sys.exit(1)
@@ -1173,6 +1174,7 @@ async def launch_browser(proxy_url: str | None):
         "locale": "en-US",
         "geoip": True,
         "block_webrtc": True,
+        "exclude_addons": [DefaultAddons.UBO],  # disable uBlock Origin (blokir form email x.ai)
     }
     if proxy_url:
         kwargs["proxy"] = _parse_proxy(proxy_url)

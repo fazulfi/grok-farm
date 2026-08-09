@@ -18,7 +18,7 @@ SSH = [
     "StrictHostKeyChecking=no",
     "-o",
     "ConnectTimeout=15",
-    "root@49.12.82.34",
+    "root@GW_IP",
     "-p",
     "39999",
 ]

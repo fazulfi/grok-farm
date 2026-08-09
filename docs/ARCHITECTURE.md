@@ -41,10 +41,10 @@ After inject, token alive/dead is a **9router / consumer** concern. Steady state
 
 | Role | Host (live) | User | Port / path |
 |------|-------------|------|-------------|
-| Farmer fleet | grok2–grok6 DO SGP1 (see AGENTS §3 / CAPACITY §6.2) | `magadirxwin` (non-root) | `~/grok-farm` |
-| Gateway | 9router `49.12.82.34:39999` | `root` SSH | HTTP `20128` |
+| Farmer fleet | grok2–grok6 DO SGP1 (see AGENTS §3 / CAPACITY §6.2) | `USER` (non-root) | `~/grok-farm` |
+| Gateway | 9router `GW_IP:39999` | `root` SSH | HTTP `20128` |
 | OTP inbox | Gmail (1..N via Pattern B) | App password | IMAP `993` |
-| Domain pool | `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` | Cloudflare Email Routing | catch-all → IMAP (Pattern B) |
+| Domain pool | `YOURDOMAIN.com`, `YOURDOMAIN.com`, `YOURDOMAIN.com` | Cloudflare Email Routing | catch-all → IMAP (Pattern B) |
 
 **Hard constraint:** Camoufox must **not** run as root (XPCOM incomplete under root cache).
 
@@ -62,7 +62,7 @@ After inject, token alive/dead is a **9router / consumer** concern. Steady state
 ### 3.1b Identity plane (`email_identity.py`)
 
 ```
-GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site
+GROK_EMAIL_DOMAINS=YOURDOMAIN.com,YOURDOMAIN.com,YOURDOMAIN.com
         │
         ▼
   IdentityPool.pick_domain()  ── random | round_robin
@@ -73,7 +73,7 @@ GROK_EMAIL_DOMAINS=markettabrak.biz.id,markettabrak.my.id,markettabrak.site
 
 | Config | Role |
 |--------|------|
-| `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred; live: markettabrak.*) |
+| `GROK_EMAIL_DOMAINS` | Comma list of catch-all domains (preferred; live: YOURDOMAIN.com) |
 | `GROK_EMAIL_DOMAIN` | Legacy single domain (merged into pool) |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `random` (default) or `round_robin` |
 | `GROK_EMAIL_LOCAL_STYLE` | `realistic` (default human names) · `crypto` (hash) · `parser` (API) |

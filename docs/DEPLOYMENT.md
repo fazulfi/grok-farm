@@ -11,7 +11,7 @@
 | Item | Notes |
 |------|--------|
 | Ubuntu 22.04/24.04 VPS | **4 vCPU / 8 GB RAM** recommended; non-EU egress preferred for Grok 4.5 |
-| Non-root sudo user | e.g. `magadirxwin` — **never run Camoufox as root** |
+| Non-root sudo user | e.g. `USER` — **never run Camoufox as root** |
 | Domain catch-all (1..N) | Cloudflare Email Routing → Gmail (Pattern B = 1 domain → 1 Gmail) |
 | Gmail App Password(s) | IMAP OTP; store in password manager |
 | Residential proxies | Via 9router **proxyPools** (non-EU) |
@@ -26,7 +26,7 @@
 ### 2.1 Root bootstrap
 
 ```bash
-export FARM_USER=magadirxwin
+export FARM_USER=USER
 adduser --disabled-password --gecos "" "$FARM_USER"
 usermod -aG sudo "$FARM_USER"
 
@@ -66,7 +66,7 @@ chmod +x install.sh run.sh brutal_farmer.sh scripts/*.sh
 Workstation helper:
 
 ```bash
-./scripts/deploy_farm_vps.sh magadirxwin@FARM_IP --branch main
+./scripts/deploy_farm_vps.sh USER@FARM_IP --branch main
 ```
 
 ### 2.3 Secrets
@@ -84,17 +84,17 @@ nano .env
 | `GROK_IMAP_USER` | primary Gmail |
 | `GROK_IMAP_PASS` | App Password (spaces OK; strip if needed) |
 | `GROK_EMAIL_MODE` | `domain` |
-| `GROK_EMAIL_DOMAINS` | `markettabrak.biz.id,markettabrak.my.id,markettabrak.site` |
+| `GROK_EMAIL_DOMAINS` | `YOURDOMAIN.com,YOURDOMAIN.com,YOURDOMAIN.com` |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `round_robin` |
 | `GROK_PASSWORD` | **Single-quoted** if contains `#` `&` `!` |
 | `GROK_HEADLESS` | `true` on VPS |
 | `GROK_CONCURRENT` | `3` |
 | `GROK_CONCURRENT_MIN` / `MAX` | `1` / `3` |
 | `GROK_ADAPTIVE_CONCURRENT` | `1` |
-| `GROK_PROXY_FILE` | `/home/magadirxwin/grok-farm/usa_proxies.txt` |
-| `GROK_9R_SSH` | `root@49.12.82.34` |
+| `GROK_PROXY_FILE` | `/home/USER/grok-farm/usa_proxies.txt` |
+| `GROK_9R_SSH` | `root@GW_IP` |
 | `GROK_9R_PORT` | `39999` |
-| `GROK_9R_KEY` | `/home/magadirxwin/.ssh/id_ed25519` |
+| `GROK_9R_KEY` | `/home/USER/.ssh/id_ed25519` |
 | `GROK_MID_DRAIN_INTERVAL` | `120` (brutal v5 mid-batch inject) |
 
 Multi-Gmail Pattern B:
@@ -119,19 +119,19 @@ chown "$USER:$USER" farm_brutal.log workflow.log
 
 ```bash
 # As root — substitute user/home if different
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farmer.service > /etc/systemd/system/grok-farmer.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-backup.service > /etc/systemd/system/grok-farm-backup.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-health.service > /etc/systemd/system/grok-farm-health.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-probe.service > /etc/systemd/system/grok-farm-probe.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-reconcile.service > /etc/systemd/system/grok-farm-reconcile.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-mark-expired.service > /etc/systemd/system/grok-farm-mark-expired.service
-sed "s/magadirxwin/USER/g; s|/home/magadirxwin|/home/USER|g" \
+sed "s/USER/USER/g; s|/home/USER|/home/USER|g" \
   systemd/grok-farm-digest.service > /etc/systemd/system/grok-farm-digest.service
 cp systemd/grok-farm-backup.timer /etc/systemd/system/
 cp systemd/grok-farm-health.timer /etc/systemd/system/
@@ -231,9 +231,9 @@ python3 /root/export_9r_to_akun.py /tmp/akun_rebuild.db
 
 ```bash
 # Workstation with git + ssh
-./scripts/deploy_farm_vps.sh magadirxwin@farm-vps --branch main
-./scripts/backup_farm.sh magadirxwin@farm-vps ./backups
-./scripts/restore_farm.sh magadirxwin@farm-vps ./backups/xxx.tgz
+./scripts/deploy_farm_vps.sh USER@farm-vps --branch main
+./scripts/backup_farm.sh USER@farm-vps ./backups
+./scripts/restore_farm.sh USER@farm-vps ./backups/xxx.tgz
 # Local age (on farm)
 bash scripts/local_age_backup.sh
 # S3 age (needs backup.env)
@@ -316,13 +316,13 @@ git fetch --tags && git checkout main   # or newer tag when released
 
 | Host | IP | User | Notes |
 |------|-----|------|-------|
-| grok2 | `157.245.55.62` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok2` |
-| grok3 | `168.144.36.46` | `magadirxwin` | 8G · concurrent **3** · fleet digest leader · S3 `farm-vps/grok3` |
-| grok4 | `104.248.157.41` | `magadirxwin` | 8G · concurrent **3** · mid-drain 120s · S3 `farm-vps/grok4` |
-| grok5 | `168.144.37.202` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok5` |
-| grok6 | `167.71.208.99` | `magadirxwin` | 8G · concurrent **3** · S3 `farm-vps/grok6` |
-| Gateway | `49.12.82.34:39999` | root (SSH) | proxyPools + inject |
-| OTP domains | `markettabrak.biz.id`, `markettabrak.my.id`, `markettabrak.site` | CF → Gmail | live pool (3) Pattern B |
+| grok2 | `VPS_IP1` | `USER` | 8G · concurrent **3** · S3 `farm-vps/grok2` |
+| grok3 | `VPS_IP2` | `USER` | 8G · concurrent **3** · fleet digest leader · S3 `farm-vps/grok3` |
+| grok4 | `VPS_IP3` | `USER` | 8G · concurrent **3** · mid-drain 120s · S3 `farm-vps/grok4` |
+| grok5 | `VPS_IP4` | `USER` | 8G · concurrent **3** · S3 `farm-vps/grok5` |
+| grok6 | `VPS_IP5` | `USER` | 8G · concurrent **3** · S3 `farm-vps/grok6` |
+| Gateway | `GW_IP:39999` | root (SSH) | proxyPools + inject |
+| OTP domains | `YOURDOMAIN.com`, `YOURDOMAIN.com`, `YOURDOMAIN.com` | CF → Gmail | live pool (3) Pattern B |
 
 Multi-VPS sizing + mid-drain rules: [CAPACITY.md](./CAPACITY.md) §6.2. Agent host map: `AGENTS.md` §3 / §9.
 

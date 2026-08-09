@@ -15,7 +15,7 @@ journalctl -u grok-farmer -n 100 --no-pager
 
 1. `systemctl restart grok-farmer`
 2. If crash loop: run manually  
-   `su - magadirxwin -c 'cd ~/grok-farm && bash -x brutal_farmer.sh'`
+   `su - USER -c 'cd ~/grok-farm && bash -x brutal_farmer.sh'`
 3. Check disk: `df -h`
 4. Check permissions on `~/grok-farm` (owner = farmer user)
 
@@ -61,7 +61,7 @@ python3 sync_proxies_from_9r.py
 
 ### R3c — Domain selected but OTP never for that domain (multi-domain)
 
-**Symptom:** farm starts `user@newdomain.com`, IMAP waits, timeout; known-good domain (e.g. markettabrak.my.id) still gets OTP.
+**Symptom:** farm starts `user@newdomain.com`, IMAP waits, timeout; known-good domain (e.g. YOURDOMAIN.com) still gets OTP.
 
 **Evidence probe (on farmer host, secrets not printed):**
 
@@ -107,7 +107,7 @@ PY
 ```sql
 -- re-enable after routing fixed (farmer host, akun.db)
 UPDATE domain_stats SET consecutive_fails=0, disabled=0, updated_at=datetime('now')
- WHERE domain='markettabrak.site';
+ WHERE domain='YOURDOMAIN.com';
 ```
 
 **Do not** assume Cloudflare UI “Active” means OTP inbox receives xAI mail — always verify with IMAP probe.
@@ -396,7 +396,7 @@ python3 probe_tokens.py --mark-error --limit 10
 
 ```bash
 # Once: deploy list helper to gateway (same pattern as inject helpers)
-scp -P 39999 ops/list_grok_connections.py root@49.12.82.34:/root/list_grok_connections.py
+scp -P 39999 ops/list_grok_connections.py root@GW_IP:/root/list_grok_connections.py
 
 # On farm
 python3 reconcile_9router.py

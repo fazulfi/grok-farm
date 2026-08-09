@@ -7,14 +7,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 # IMPORTANT: non-root user that owns Camoufox cache (~/.cache/camoufox)
-User=magadirxwin
-Group=magadirxwin
-WorkingDirectory=/home/magadirxwin/grok-farm
-ExecStart=/bin/bash /home/magadirxwin/grok-farm/brutal_farmer.sh
+User=USER
+Group=USER
+WorkingDirectory=/home/USER/grok-farm
+ExecStart=/bin/bash /home/USER/grok-farm/brutal_farmer.sh
 Restart=always
 RestartSec=30
-StandardOutput=append:/home/magadirxwin/grok-farm/farm_brutal.log
-StandardError=append:/home/magadirxwin/grok-farm/farm_brutal.log
+StandardOutput=append:/home/USER/grok-farm/farm_brutal.log
+StandardError=append:/home/USER/grok-farm/farm_brutal.log
 NoNewPrivileges=true
 PrivateTmp=true
 

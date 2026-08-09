@@ -1,17 +1,15 @@
 #!/bin/bash
 # Brutal Farmer v5 — proxy from 9router proxyPools; auto import+inject after each batch
-cd /home/magadirxwin/grok-farm || exit 1
+ROOT=$(cd "$(dirname "$0")" && pwd)
+cd "$ROOT" || exit 1
 ACCOUNTS_PER_BATCH=20
-CONCURRENT=3
+CONCURRENT=1
 BATCH_DELAY=10
 # Mid-batch drain: while farm.py runs, periodically import+inject accounts.txt (seconds; 0=off)
 MID_DRAIN_INTERVAL="${GROK_MID_DRAIN_INTERVAL:-120}"
 trap 'echo "[FARMER] Stopped by signal"; exit 0' SIGINT SIGTERM
 
-# Ensure .env points to synced proxy file
-if ! grep -q 'GROK_PROXY_FILE=.*usa_proxies.txt' .env 2>/dev/null; then
-  sed -i 's|GROK_PROXY_FILE=.*|GROK_PROXY_FILE=~/grok-farm/usa_proxies.txt|' .env 2>/dev/null || true
-fi
+# GROK_PROXY_FILE diambil dari .env (jangan force usa_proxies)
 
 # Logs must be writable by farmer user (root-owned workflow.log silently breaks auto inject)
 ensure_logs() {
@@ -36,10 +34,10 @@ ensure_logs() {
 run_import_workflow() {
   local tag="${1:-post-batch}"
   echo "[FARMER] import+workflow ($tag) log=$WORKFLOW_LOG"
-  if ! "$PY" /home/magadirxwin/grok-farm/import_db.py >>"$WORKFLOW_LOG" 2>&1; then
+  if ! "$PY" ${ROOT}/import_db.py >>"$WORKFLOW_LOG" 2>&1; then
     echo "[FARMER] WARN: import_db failed ($tag) — see $WORKFLOW_LOG"
   fi
-  if ! "$PY" /home/magadirxwin/grok-farm/workflow.py >>"$WORKFLOW_LOG" 2>&1; then
+  if ! "$PY" ${ROOT}/workflow.py >>"$WORKFLOW_LOG" 2>&1; then
     echo "[FARMER] WARN: workflow failed ($tag) — see $WORKFLOW_LOG"
   fi
   # Surface last summary line into farm_brutal.log (stdout)
@@ -53,29 +51,36 @@ echo "[FARMER] Brutal Farmer v5 — 9router proxyPools"
 echo "[FARMER] Started at $(date) user=$(whoami) workflow_log=$WORKFLOW_LOG"
 echo "[FARMER] ========================================"
 
+# Load .env early (sebelum sync proxy) so GROK_SKIP_PROXY_SYNC & GROK_* kebaca
+set -a
+# shellcheck disable=SC1091
+[ -f .env ] && . ./.env
+set +a
+
 while true; do
     echo "[FARMER] === Batch started at $(date) ==="
     ensure_logs
 
     # 1) Sync proxy list from 9router proxyPools (source of truth)
-    echo "[FARMER] Syncing proxies from 9router proxyPools..."
-    if ! python3 /home/magadirxwin/grok-farm/sync_proxies_from_9r.py; then
-        echo "[FARMER] WARN: proxy sync failed — skip farm this round, retry in ${BATCH_DELAY}s"
-        sleep "$BATCH_DELAY"
-        continue
+    if [ "${GROK_SKIP_PROXY_SYNC:-0}" != "1" ]; then
+        echo "[FARMER] Syncing proxies from 9router proxyPools..."
+        if ! python3 ${ROOT}/sync_proxies_from_9r.py; then
+            echo "[FARMER] WARN: proxy sync failed — skip farm this round, retry in ${BATCH_DELAY}s"
+            sleep "$BATCH_DELAY"
+            continue
+        fi
+    else
+        echo "[FARMER] GROK_SKIP_PROXY_SYNC=1 — pakai proxies.txt existing"
     fi
 
-    # Load .env early so adaptive + post-batch import/inject see GROK_* (quote secrets with #)
-    set -a
-    # shellcheck disable=SC1091
-    [ -f .env ] && . ./.env
+
     set +a
     PY="${FARM_PY:-.venv/bin/python}"
     [[ -x "$PY" ]] || PY=python3
     ensure_logs
 
     # 1a) Empty local proxy file → skip farm (inject already fail-closed on empty proxyPools)
-    PROXY_FILE="${GROK_PROXY_FILE:-$HOME/grok-farm/usa_proxies.txt}"
+    PROXY_FILE="${GROK_PROXY_FILE:-./proxies.txt}"
     PROXY_FILE="${PROXY_FILE/#\~/$HOME}"
     PROXY_N=0
     if [ -f "$PROXY_FILE" ]; then

@@ -29,7 +29,7 @@ Call model via 9Router: POST /v1/chat/completions {"model":"gcli/grok-4.5"}
 | `/api/providers` | GET | — | daftar connection |
 
 Auth: header `x-9r-cli-token: <16-char sha256(machineId + "9r-cli-auth" + cliSecret)[:16]>`
-Lokasi: `http://127.0.0.1:20228` (gateway host) atau `https://router.markettabrak.biz.id` (dari VPS).
+Lokasi: `http://127.0.0.1:20228` (gateway host) atau `https://router.YOURDOMAIN.com` (dari VPS).
 
 ## 3. KRITIS — inject TANPA browser (bukan device-code!)
 
@@ -75,7 +75,7 @@ Mode: `--pool-mode per-akun` (default, 1 proxy unik/akun) | `rotate`.
 
 ```bash
 # call model via 9Router (api key dari apiKeys table, e.g. hiyuki)
-curl https://router.markettabrak.biz.id/v1/chat/completions \
+curl https://router.YOURDOMAIN.com/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"model":"gcli/grok-4.5","messages":[{"role":"user","content":"..."}]}'
 # → grok-4.5 reasoning OK (free account, no subscription!)

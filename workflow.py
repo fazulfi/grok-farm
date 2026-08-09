@@ -90,7 +90,7 @@ SSH = [
     "StrictHostKeyChecking=no",
     "-o",
     "ConnectTimeout=15",
-    os.environ.get("GROK_9R_SSH") or "root@49.12.82.34",
+    os.environ.get("GROK_9R_SSH") or "root@GW_IP",
     "-p",
     _SSH_PORT,
 ]

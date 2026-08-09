@@ -37,7 +37,7 @@ All notable changes to Grok Farm are documented here.
 - `run_farm100.sh` — launch farm 100 akun (sequential, log /tmp/farm100.log).
 
 ### Verified
-- 1 akun test: `u3un21sf6yfe@gogoligo.web.id` → token ✓ → injected ✓ → conn `f0dad024-...` pool `90d34908-...` (84.0s).
+- 1 akun test: `u3un21sf6yfe@YOURDOMAIN.com` → token ✓ → injected ✓ → conn `f0dad024-...` pool `90d34908-...` (84.0s).
 - Farm 100 akun running (2026-08-07 12:52 UTC).
 
 ## [v2.6.0-inject] — 2026-08-07
@@ -54,16 +54,16 @@ All notable changes to Grok Farm are documented here.
 
 ### Verified
 - `R9_TOKEN=... python3 inject_grok_cli_9router.py --input v2_sso.txt`
-  → `[1] OK af71o796cxxk@gogoligo.biz.id -> conn ... ; proxy -> Imported 46.202.227.181:8188 ; DONE: ok=1 fail=0`
+  → `[1] OK af71o796cxxk@YOURDOMAIN.com -> conn ... ; proxy -> Imported 46.202.227.181:8188 ; DONE: ok=1 fail=0`
 - 3 connection grok-cli active (1 manual + 2 inject), call grok-4.5 OK.
 
 ## [v2.5.0-verified] — 2026-08-07
 
 ### Added
 - **`docs/METHOD-2026-08-07.md`** — metode resmi yang **TERBUKTI** (production-tested 1 akun
-  sukses end-to-end: `e0sk2n2atc7u@gogoligo.my.id` → grok.com, 71.9s). Dokumentasi lengkap:
+  sukses end-to-end: `e0sk2n2atc7u@YOURDOMAIN.com` → grok.com, 71.9s). Dokumentasi lengkap:
   - Playwright `channel='chrome'` + headed/xvfb + WebShare proxy **split-creds** (bukan URL-embedded — ERR_INVALID_AUTH_CREDENTIALS).
-  - CF Email Routing catch-all → Gmail (domain gogoligo.*, 1 Gmail shared).
+  - CF Email Routing catch-all → Gmail (domain YOURDOMAIN.com, 1 Gmail shared).
   - **OTP IMAP via proxy CONNECT tunnel** (idcloudhost SG blokir 993 langsung).
   - **OTP input keyboard typing** (6 kotak React, `.fill()` gagal).
   - **Turnstile solve via iframe `challenges.cloudflare.com`** (checkbox cookie banner ≠ Turnstile).
@@ -71,7 +71,7 @@ All notable changes to Grok Farm are documented here.
 - `farm_v2.py` v2.5: semua fix di atas (proxy split-creds, IMAP via CONNECT, keyboard OTP, turnstile iframe).
 
 ### Verified
-- `python3 farm_v2.py 1` → `[1] OK e0sk2n2atc7u@gogoligo.my.id (71.9s)`, URL grok.com, 28 SSO cookies.
+- `python3 farm_v2.py 1` → `[1] OK e0sk2n2atc7u@YOURDOMAIN.com (71.9s)`, URL grok.com, 28 SSO cookies.
 
 ## [v2.4.0-audit] — 2026-08-07
 
@@ -113,11 +113,11 @@ All notable changes to Grok Farm are documented here.
 ### Changed
 
 - **Fleet rebuild (2026-07-16):** prior DO trial hosts dead → new 5×8G SGP1
-  fleet: `grok2` `157.245.55.62`, `grok3` `168.144.36.46`, `grok4`
-  `104.248.157.41`, `grok5` `168.144.37.202`, `grok6` `167.71.208.99`
+  fleet: `grok2` `VPS_IP1`, `grok3` `VPS_IP2`, `grok4`
+  `VPS_IP3`, `grok5` `VPS_IP4`, `grok6` `VPS_IP5`
   (all concurrent **3**; mid-drain only grok4; digest leader grok3). OTP
-  domains (3): `markettabrak.biz.id` + `markettabrak.my.id` +
-  `markettabrak.site` (Pattern B multi-IMAP). Dead hosts/domains purged from
+  domains (3): `YOURDOMAIN.com` + `YOURDOMAIN.com` +
+  `YOURDOMAIN.com` (Pattern B multi-IMAP). Dead hosts/domains purged from
   inventory docs (AGENTS/CAPACITY/OPERATIONS/DEPLOYMENT/MIGRATION).
 
 ### Added

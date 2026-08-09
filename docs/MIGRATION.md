@@ -29,14 +29,14 @@ Related: [DEPLOYMENT.md](./DEPLOYMENT.md) · [RUNBOOK.md](./RUNBOOK.md) R16 · [
 
 | Role | Current (2026-07-16) | Notes |
 |------|----------------------|--------|
-| Farm fleet | **grok2** `157.245.55.62` · **grok3** `168.144.36.46` · **grok4** `104.248.157.41` · **grok5** `168.144.37.202` · **grok6** `167.71.208.99` | DO SGP1; all 8G concurrent **3**; mid-drain **grok4** only; digest leader **grok3** |
-| Farm user | `magadirxwin` (non-root) | Camoufox **must not** run as root |
-| App dir | `/home/magadirxwin/grok-farm` | per host |
+| Farm fleet | **grok2** `VPS_IP1` · **grok3** `VPS_IP2` · **grok4** `VPS_IP3` · **grok5** `VPS_IP4` · **grok6** `VPS_IP5` | DO SGP1; all 8G concurrent **3**; mid-drain **grok4** only; digest leader **grok3** |
+| Farm user | `USER` (non-root) | Camoufox **must not** run as root |
+| App dir | `/home/USER/grok-farm` | per host |
 | DB | `~/grok-farm/akun.db` mode **600** | **per-host** (not shared) |
-| Gateway | `49.12.82.34` SSH port **39999** | 9router Pro; API often `:20128` |
+| Gateway | `GW_IP` SSH port **39999** | 9router Pro; API often `:20128` |
 | Proxy SoT | 9router **`proxyPools`** | Sync → `usa_proxies.txt` |
 | Backup S3 | `s3://grok-farm/farm-vps/grok{N}/…` | age encrypt; `backup.env` per host |
-| Domains | `markettabrak.biz.id` + `markettabrak.my.id` + `markettabrak.site` | Pattern B → three Gmails |
+| Domains | `YOURDOMAIN.com` + `YOURDOMAIN.com` + `YOURDOMAIN.com` | Pattern B → three Gmails |
 | Code pin | tag **`v2.3.2`+** / `main` | Prefer release tag |
 
 ---
@@ -78,7 +78,7 @@ Password manager:
 # From workstation — pull latest age archive (S3 preferred)
 # aws s3 cp s3://grok-farm/farm-vps/grok3/latest.tgz.age ./backups/ --endpoint-url …
 # or scp one live host:
-scp magadirxwin@168.144.36.46:~/grok-farm/backups/latest.tgz.age ./backups/
+scp USER@VPS_IP2:~/grok-farm/backups/latest.tgz.age ./backups/
 # Decrypt only when needed:
 # age -d -i ~/.config/grok-farm/age.identity -o restore.tgz latest.tgz.age
 ```
@@ -124,7 +124,7 @@ Follow [DEPLOYMENT.md](./DEPLOYMENT.md) §2 **with least privilege** (do **not**
 
 ```bash
 # As root on NEW VPS
-export FARM_USER=magadirxwin
+export FARM_USER=USER
 adduser --disabled-password --gecos "" "$FARM_USER"
 usermod -aG sudo "$FARM_USER"
 # Limited sudoers only (copy from live or create):
@@ -148,7 +148,7 @@ echo 'vm.swappiness=10' >> /etc/sysctl.conf && sysctl vm.swappiness=10
 
 ```bash
 # Prefer tag
-sudo -u magadirxwin -i
+sudo -u USER -i
 cd ~
 git clone --branch v2.2.0 https://github.com/fazulfi/grok-farm.git grok-farm
 # or: git clone --branch main ...
@@ -157,7 +157,7 @@ chmod +x install.sh run.sh brutal_farmer.sh scripts/*.sh
 ./install.sh   # venv + Camoufox + GeoIP + uBlock — takes several minutes
 ```
 
-Workstation alternate: `./scripts/deploy_farm_vps.sh magadirxwin@NEW_IP --branch main`
+Workstation alternate: `./scripts/deploy_farm_vps.sh USER@NEW_IP --branch main`
 
 ### A.4 Restore secrets from decrypted tarball
 
@@ -166,7 +166,7 @@ Workstation alternate: `./scripts/deploy_farm_vps.sh magadirxwin@NEW_IP --branch
 #   credentials/.env  credentials/akun.db  identities.json
 #   or flat .env akun.db
 
-sudo -u magadirxwin bash -lc '
+sudo -u USER bash -lc '
   cd ~/grok-farm
   # adjust SRC after inspecting tar
   cp /tmp/restore/.env .env
@@ -174,7 +174,7 @@ sudo -u magadirxwin bash -lc '
   test -f /tmp/restore/identities.json && cp /tmp/restore/identities.json .
   chmod 600 .env akun.db identities.json 2>/dev/null || true
   touch farm_brutal.log workflow.log
-  chown magadirxwin:magadirxwin farm_brutal.log workflow.log
+  chown USER:USER farm_brutal.log workflow.log
 '
 ```
 
@@ -191,8 +191,8 @@ GROK_PASSWORD='4Dj@w!cqZ9d&R0#3hDT4'
 
 ```bash
 # Encrypt pubkey for farmer backups
-install -d -m 700 /home/magadirxwin/.config/grok-farm
-# copy age.pubkey → /home/magadirxwin/.config/grok-farm/age.pubkey (644)
+install -d -m 700 /home/USER/.config/grok-farm
+# copy age.pubkey → /home/USER/.config/grok-farm/age.pubkey (644)
 # Private identity: root-only (decrypt DR)
 install -d -m 700 /root/.config/grok-farm
 # copy age.identity → /root/.config/grok-farm/age.identity (600)
@@ -201,21 +201,21 @@ install -d -m 700 /root/.config/grok-farm
 ### A.6 Farm → 9router SSH
 
 ```bash
-# As magadirxwin
+# As USER
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519   # or restore private key from vault
 # On 9router (root):
-#   echo 'ssh-ed25519 AAAA... magadirxwin@farm' >> ~/.ssh/authorized_keys
+#   echo 'ssh-ed25519 AAAA... USER@farm' >> ~/.ssh/authorized_keys
 
 # Test (port 39999 production):
-ssh -p 39999 -i ~/.ssh/id_ed25519 -o BatchMode=yes root@49.12.82.34 'echo 9R_OK'
+ssh -p 39999 -i ~/.ssh/id_ed25519 -o BatchMode=yes root@GW_IP 'echo 9R_OK'
 ```
 
 `.env` keys (aliases supported by `workflow.py`):
 
 ```bash
-GROK_9R_SSH=root@49.12.82.34
+GROK_9R_SSH=root@GW_IP
 GROK_9R_PORT=39999
-GROK_9R_KEY=/home/magadirxwin/.ssh/id_ed25519
+GROK_9R_KEY=/home/USER/.ssh/id_ed25519
 # also accepted: GROK_9R_SSH_KEY / GROK_9R_SSH_PORT
 ```
 
@@ -240,9 +240,9 @@ python3 sync_proxies_from_9r.py    # expect ~65 lines → usa_proxies.txt
 # GROK_CONCURRENT=3 GROK_CONCURRENT_MIN=1 GROK_CONCURRENT_MAX=3 GROK_ADAPTIVE_CONCURRENT=1
 
 # Install units (as root)
-sed "s/magadirxwin/$USER/g; s|/home/magadirxwin|$HOME|g" systemd/grok-farmer.service \
+sed "s/USER/$USER/g; s|/home/USER|$HOME|g" systemd/grok-farmer.service \
   | sudo tee /etc/systemd/system/grok-farmer.service
-sed "s/magadirxwin/$USER/g; s|/home/magadirxwin|$HOME|g" systemd/grok-farm-backup.service \
+sed "s/USER/$USER/g; s|/home/USER|$HOME|g" systemd/grok-farm-backup.service \
   | sudo tee /etc/systemd/system/grok-farm-backup.service
 sudo cp systemd/grok-farm-backup.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -276,8 +276,8 @@ Code install + swap + non-root user + limited sudoers + Camoufox.
 ### B.3 Place rebuilt DB
 
 ```bash
-scp akun_rebuild.db magadirxwin@NEW:/home/magadirxwin/grok-farm/akun.db
-ssh magadirxwin@NEW 'chmod 600 ~/grok-farm/akun.db; chown magadirxwin:magadirxwin ~/grok-farm/akun.db'
+scp akun_rebuild.db USER@NEW:/home/USER/grok-farm/akun.db
+ssh USER@NEW 'chmod 600 ~/grok-farm/akun.db; chown USER:USER ~/grok-farm/akun.db'
 ```
 
 Notes after rebuild:
@@ -293,7 +293,7 @@ Create `~/grok-farm/.env` from `.env.example` with **real** values:
 | Key | Purpose |
 |-----|---------|
 | `GROK_IMAP_USER` / `GROK_IMAP_PASS` | Primary Gmail App Password |
-| `GROK_EMAIL_DOMAINS` | e.g. `markettabrak.biz.id,markettabrak.my.id,markettabrak.site` |
+| `GROK_EMAIL_DOMAINS` | e.g. `YOURDOMAIN.com,YOURDOMAIN.com,YOURDOMAIN.com` |
 | `GROK_EMAIL_DOMAIN_STRATEGY` | `round_robin` recommended |
 | `GROK_PASSWORD` | **Quoted** farm password for xAI signup |
 | `GROK_HEADLESS=true` | VPS |
@@ -312,7 +312,7 @@ Pattern B multi-Gmail — `identities.json` (chmod 600, **never git**):
       "imap_pass": "xxxx xxxx xxxx xxxx",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["markettabrak.biz.id"],
+      "domains": ["YOURDOMAIN.com"],
       "enabled": true
     },
     {
@@ -321,7 +321,7 @@ Pattern B multi-Gmail — `identities.json` (chmod 600, **never git**):
       "imap_pass": "yyyy yyyy yyyy yyyy",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["markettabrak.my.id"],
+      "domains": ["YOURDOMAIN.com"],
       "enabled": true
     },
     {
@@ -330,7 +330,7 @@ Pattern B multi-Gmail — `identities.json` (chmod 600, **never git**):
       "imap_pass": "zzzz zzzz zzzz zzzz",
       "imap_host": "imap.gmail.com",
       "imap_port": 993,
-      "domains": ["markettabrak.site"],
+      "domains": ["YOURDOMAIN.com"],
       "enabled": true
     }
   ]
@@ -375,13 +375,13 @@ python3 check_status.py
 
 ```bash
 # Workstation
-./scripts/backup_farm.sh magadirxwin@OLD_IP ./backups
+./scripts/backup_farm.sh USER@OLD_IP ./backups
 # Prefer age-encrypted if AGE_RECIPIENT set
-./scripts/deploy_farm_vps.sh magadirxwin@NEW_IP --branch main
-./scripts/restore_farm.sh magadirxwin@NEW_IP ./backups/grok-farm-backup-XXXX.tgz
+./scripts/deploy_farm_vps.sh USER@NEW_IP --branch main
+./scripts/restore_farm.sh USER@NEW_IP ./backups/grok-farm-backup-XXXX.tgz
 
-ssh magadirxwin@NEW_IP 'cd ~/grok-farm && python3 sync_proxies_from_9r.py && python3 workflow.py && sudo systemctl enable --now grok-farmer'
-ssh magadirxwin@OLD_IP 'sudo systemctl disable --now grok-farmer'
+ssh USER@NEW_IP 'cd ~/grok-farm && python3 sync_proxies_from_9r.py && python3 workflow.py && sudo systemctl enable --now grok-farmer'
+ssh USER@OLD_IP 'sudo systemctl disable --now grok-farmer'
 ```
 
 Keep old disk 7 days offline for rollback.
@@ -432,7 +432,7 @@ grep -E 'SUMMARY|Permission denied|Brutal Farmer v|mid-drain' farm_brutal.log | 
 If `workflow.log` is root-owned (common after root debugging):
 
 ```bash
-sudo chown magadirxwin:magadirxwin ~/grok-farm/workflow.log ~/grok-farm/farm_brutal.log
+sudo chown USER:USER ~/grok-farm/workflow.log ~/grok-farm/farm_brutal.log
 # brutal v5 also falls back to workflow_user.log if unwritable
 ```
 
@@ -499,32 +499,32 @@ If OTP fails after restore: RUNBOOK **R3 / R3c** (probe IMAP To: headers).
 
 ```sshconfig
 Host grok2
-  HostName 157.245.55.62
-  User magadirxwin
+  HostName VPS_IP1
+  User USER
   IdentityFile ~/.ssh/id_ed25519
 
 Host grok3
-  HostName 168.144.36.46
-  User magadirxwin
+  HostName VPS_IP2
+  User USER
   IdentityFile ~/.ssh/id_ed25519
 
 Host grok4
-  HostName 104.248.157.41
-  User magadirxwin
+  HostName VPS_IP3
+  User USER
   IdentityFile ~/.ssh/id_ed25519
 
 Host grok5
-  HostName 168.144.37.202
-  User magadirxwin
+  HostName VPS_IP4
+  User USER
   IdentityFile ~/.ssh/id_ed25519
 
 Host grok6
-  HostName 167.71.208.99
-  User magadirxwin
+  HostName VPS_IP5
+  User USER
   IdentityFile ~/.ssh/id_ed25519
 
 Host ninerouter
-  HostName 49.12.82.34
+  HostName GW_IP
   Port 39999
   User root
   IdentityFile ~/.ssh/id_ed25519

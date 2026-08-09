@@ -1,8 +1,8 @@
 ﻿#!/usr/bin/env bash
 # Restore .env + akun.db from a local backup tarball onto a farm VPS.
 # Usage:
-#   ./scripts/restore_farm.sh magadirxwin@FARM_IP ./backups/grok-farm-backup-XXX.tgz
-#   ./scripts/restore_farm.sh magadirxwin@FARM_IP ./backups/xxx.tgz.age [age_identity_file]
+#   ./scripts/restore_farm.sh USER@FARM_IP ./backups/grok-farm-backup-XXX.tgz
+#   ./scripts/restore_farm.sh USER@FARM_IP ./backups/xxx.tgz.age [age_identity_file]
 set -euo pipefail
 
 TARGET="${1:-}"

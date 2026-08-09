@@ -7,7 +7,7 @@ m = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=20)
 m.login(os.environ.get("GROK_IMAP_USER", ""), os.environ.get("GROK_IMAP_PASS", "").replace(" ", ""))
 m.select("INBOX")
 target_local = "lc3ss3un2u8m"
-target_email = f"{target_local}@gogoligo.my.id"
+target_email = f"{target_local}@YOURDOMAIN.com"
 
 st, msgs = m.search(None, '(FROM "x.ai")')
 mids = [x.decode() for x in (msgs[0].split() if msgs and msgs[0] else [])]

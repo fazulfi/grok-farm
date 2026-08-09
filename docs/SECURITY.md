@@ -90,7 +90,7 @@ age -r age1... -o akun.db.age akun.db
 
 # Decrypt restore (operator only — needs private identity from vault)
 age -d -i ~/.config/grok-farm/age.identity -o restore.tgz backup.tgz.age
-./scripts/restore_farm.sh magadirxwin@FARM_IP ./backup.tgz.age
+./scripts/restore_farm.sh USER@FARM_IP ./backup.tgz.age
 ```
 
 `BACKUP_ENCRYPT=none` is emergency-only and is a security defect for production.
@@ -179,7 +179,7 @@ If CLI not installed, decrypt on any Linux host that has the vaulted identity (V
 Example limited sudoers drop-in (prefer over ALL):
 
 ```
-magadirxwin ALL=(root) NOPASSWD: /bin/systemctl start grok-farmer, /bin/systemctl stop grok-farmer, /bin/systemctl restart grok-farmer, /bin/systemctl status grok-farmer, /bin/systemctl is-active grok-farmer
+USER ALL=(root) NOPASSWD: /bin/systemctl start grok-farmer, /bin/systemctl stop grok-farmer, /bin/systemctl restart grok-farmer, /bin/systemctl status grok-farmer, /bin/systemctl is-active grok-farmer
 ```
 
 ---

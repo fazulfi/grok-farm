@@ -16,8 +16,8 @@
 
 **Repo:** private `fazulfi/grok-farm`  
 **Code pin:** `v2.3.2`+ / `main`  
-**Live fleet (2026-07-16):** grok2 `157.245.55.62` · grok3 `168.144.36.46` · grok4 `104.248.157.41` · grok5 `168.144.37.202` · grok6 `167.71.208.99` · user `magadirxwin` · concurrent **3** · gateway `49.12.82.34:39999`  
-**OTP domains:** `markettabrak.biz.id` · `markettabrak.my.id` · `markettabrak.site`
+**Live fleet (2026-07-16):** grok2 `VPS_IP1` · grok3 `VPS_IP2` · grok4 `VPS_IP3` · grok5 `VPS_IP4` · grok6 `VPS_IP5` · user `USER` · concurrent **3** · gateway `GW_IP:39999`  
+**OTP domains:** `YOURDOMAIN.com` · `YOURDOMAIN.com` · `YOURDOMAIN.com`
 ### Quick DR
 
 1. Open **[MIGRATION.md](./MIGRATION.md)**  
