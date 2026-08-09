@@ -47,9 +47,12 @@ Thumbs.db
 .venv-v2/
 v2_sso.txt
 __pycache__/
+<<<<<<< HEAD
 
 # SSO / token dumps (sensitive)
 v2_sso.json
 v2_sso_local.txt
 *.sso.json
 screenshots/
+=======
+>>>>>>> feat/grok-farm-v2-audit
