@@ -1,3 +1,5 @@
+
+
 ﻿# Grok Farm
 
 **autofarm + auto-inject pipeline for xAI / Grok CLI OAuth credentials into 9router.**
@@ -39,7 +41,7 @@ cp .env.example .env && nano .env
 # production:
 sudo cp systemd/grok-farmer.service /etc/systemd/system/
 # adjust User= / paths
-sudo systemctl enable --now grok-farmer
+sudo systemctl daemon-reload && sudo systemctl enable --now grok-farmer
 ```
 
 **Non-root user required** (Camoufox breaks under root).
@@ -50,7 +52,7 @@ sudo systemctl enable --now grok-farmer
 |-----|-------------|
 | [AGENTS.md](./AGENTS.md) | Agent operating contract (workflow, safety, DoD) |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design |
-| [docs/OPERATIONS.md](./docs/OPERATIONS.md) | Day-2 ops |
+| [docs/OPERATIONS.md](./docs/OPERERATIONS.md) | Day-2 ops |
 | [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Fresh install |
 | [docs/MIGRATION.md](./docs/MIGRATION.md) | VPS rebuild / DR |
 | [docs/INTEGRATION-9ROUTER.md](./docs/INTEGRATION-9ROUTER.md) | Inject contract |
