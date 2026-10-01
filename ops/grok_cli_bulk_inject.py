@@ -5,7 +5,7 @@ Insert/update grok-cli + xai connections in 9router DB.
 import sys, json, sqlite3, uuid, base64
 from datetime import datetime, timezone
 
-DB = "/var/lib/9router/db/data.sqlite"
+DB = "/var/lib/9router-ind/db/data.sqlite"
 
 def now_iso():
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
